@@ -3,63 +3,60 @@ import db from '../db.js';
 
 const router = express.Router();
 
-// Criar cerca
-router.post('/', async (req, res) => {
-    const { nome, velocidade_max, velocidade_chuva } = req.body;
-    try {
-        const result = await db.query(
-            `INSERT INTO cercas (nome, velocidade_max, velocidade_chuva)
-       VALUES ($1, $2, $3) RETURNING *`,
-            [nome, velocidade_max, velocidade_chuva]
-        );
-        res.status(201).json(result.rows[0]);
-    } catch (err) {
-        res.status(500).json({ erro: 'Erro ao criar cerca' });
-    }
+// GET todas as cercas com seus pontos
+router.get('/', async (req, res) => {
+    const cercas = await db.query('SELECT * FROM cercas');
+    const pontos = await db.query('SELECT * FROM pontos_cerca');
+
+    const cercasComPontos = cercas.rows.map(cerca => ({
+        ...cerca,
+        pontos: pontos.rows.filter(p => p.cerca_id === cerca.id)
+    }));
+
+    res.json(cercasComPontos);
 });
 
-// Listar todas
-router.get('/', async (_, res) => {
-    try {
-        const result = await db.query('SELECT * FROM cercas');
-        res.json(result.rows);
-    } catch (err) {
-        res.status(500).json({ erro: 'Erro ao listar cercas' });
-    }
-});
-
-// Buscar por ID
+// GET uma cerca por ID
 router.get('/:id', async (req, res) => {
-    try {
-        const result = await db.query('SELECT * FROM cercas WHERE id = $1', [req.params.id]);
-        res.json(result.rows[0] || {});
-    } catch (err) {
-        res.status(500).json({ erro: 'Erro ao buscar cerca' });
-    }
+    const { id } = req.params;
+    const cerca = await db.query('SELECT * FROM cercas WHERE id = $1', [id]);
+    const pontos = await db.query('SELECT * FROM pontos_cerca WHERE cerca_id = $1 ORDER BY ordem', [id]);
+
+    if (cerca.rows.length === 0) return res.sendStatus(404);
+
+    res.json({ ...cerca.rows[0], pontos: pontos.rows });
 });
 
-// Atualizar
+// POST criar nova cerca
+router.post('/', async (req, res) => {
+    const { nome, cor, camada, velocidade_max, velocidade_chuva } = req.body;
+    const nova = await db.query(
+        `INSERT INTO cercas (nome, cor, camada, velocidade_max, velocidade_chuva)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [nome, cor, camada, velocidade_max, velocidade_chuva]
+    );
+    res.status(201).json(nova.rows[0]);
+});
+
+// PUT atualizar cerca
 router.put('/:id', async (req, res) => {
-    const { nome, velocidade_max, velocidade_chuva } = req.body;
-    try {
-        const result = await db.query(
-            `UPDATE cercas SET nome=$1, velocidade_max=$2, velocidade_chuva=$3 WHERE id=$4 RETURNING *`,
-            [nome, velocidade_max, velocidade_chuva, req.params.id]
-        );
-        res.json(result.rows[0]);
-    } catch (err) {
-        res.status(500).json({ erro: 'Erro ao atualizar cerca' });
-    }
+    const { id } = req.params;
+    const { nome, cor, camada, velocidade_max, velocidade_chuva } = req.body;
+
+    const atualizada = await db.query(
+        `UPDATE cercas SET nome = $1, cor = $2, camada = $3, velocidade_max = $4, velocidade_chuva = $5
+     WHERE id = $6 RETURNING *`,
+        [nome, cor, camada, velocidade_max, velocidade_chuva, id]
+    );
+
+    if (atualizada.rows.length === 0) return res.sendStatus(404);
+    res.json(atualizada.rows[0]);
 });
 
-// Deletar
+// DELETE cerca
 router.delete('/:id', async (req, res) => {
-    try {
-        await db.query('DELETE FROM cercas WHERE id = $1', [req.params.id]);
-        res.json({ mensagem: 'Cerca deletada' });
-    } catch (err) {
-        res.status(500).json({ erro: 'Erro ao deletar cerca' });
-    }
+    await db.query('DELETE FROM cercas WHERE id = $1', [req.params.id]);
+    res.sendStatus(204);
 });
 
 export default router;
