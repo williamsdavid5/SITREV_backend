@@ -59,4 +59,23 @@ router.delete('/:id', async (req, res) => {
     res.sendStatus(204);
 });
 
+// GET cercas agrupadas por camada
+router.get('/camadas/agrupadas', async (req, res) => {
+    const cercas = await db.query('SELECT * FROM cercas');
+    const pontos = await db.query('SELECT * FROM pontos_cerca');
+
+    const cercasComPontos = cercas.rows.map(cerca => ({
+        ...cerca,
+        pontos: pontos.rows.filter(p => p.cerca_id === cerca.id)
+    }));
+
+    const agrupadas = cercasComPontos.reduce((acc, cerca) => {
+        if (!acc[cerca.camada]) acc[cerca.camada] = [];
+        acc[cerca.camada].push(cerca);
+        return acc;
+    }, {});
+
+    res.json(agrupadas);
+});
+
 export default router;
