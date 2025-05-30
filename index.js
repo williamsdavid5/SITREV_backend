@@ -16,8 +16,7 @@ app.use(express.json());
 
 app.use(cors({
     origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    credentials: true
+    methods: ['GET', 'POST', 'PUT', 'DELETE']
 }));
 
 app.use('/motoristas', motoristasRoutes);
