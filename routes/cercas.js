@@ -3,6 +3,74 @@ import db from '../db.js';
 
 const router = express.Router();
 
+// GET cercas agrupadas por camada
+router.get('/camadas/agrupadas', async (req, res) => {
+    const cercas = await db.query(`
+        SELECT c.*, ca.nome AS nome_camada
+        FROM cercas c
+        JOIN camadas ca ON c.camada_id = ca.id
+    `);
+    const pontos = await db.query('SELECT * FROM pontos_cerca');
+
+    const cercasComPontos = cercas.rows.map(cerca => ({
+        id: cerca.id,
+        nome: cerca.nome,
+        tipo: cerca.tipo,
+        cor: cerca.cor,
+        velocidade_max: cerca.velocidade_max,
+        velocidade_chuva: cerca.velocidade_chuva,
+        coordenadas: pontos.rows
+            .filter(p => p.cerca_id === cerca.id)
+            .sort((a, b) => a.ordem - b.ordem)
+            .map(p => [p.latitude, p.longitude])
+    }));
+
+    // Agrupar por camada
+    const agrupadas = {};
+    cercas.rows.forEach(cerca => {
+        const camadaNome = cerca.nome_camada;
+        if (!agrupadas[camadaNome]) {
+            agrupadas[camadaNome] = [];
+        }
+        const cercaInfo = cercasComPontos.find(c => c.id === cerca.id);
+        agrupadas[camadaNome].push(cercaInfo);
+    });
+
+    res.json(agrupadas);
+});
+
+// GET todas as camadas com suas cercas
+router.get('/camadas', async (req, res) => {
+    const camadas = await db.query('SELECT * FROM camadas');
+    const cercas = await db.query('SELECT * FROM cercas');
+    const pontos = await db.query('SELECT * FROM pontos_cerca');
+
+    const resultado = camadas.rows.map(camada => {
+        const cercasDaCamada = cercas.rows
+            .filter(c => c.camada_id === camada.id)
+            .map(cerca => ({
+                id: cerca.id,
+                nome: cerca.nome,
+                tipo: cerca.tipo,
+                cor: cerca.cor,
+                velocidade_max: cerca.velocidade_max,
+                velocidade_chuva: cerca.velocidade_chuva,
+                coordenadas: pontos.rows
+                    .filter(p => p.cerca_id === cerca.id)
+                    .sort((a, b) => a.ordem - b.ordem)
+                    .map(p => [p.latitude, p.longitude])
+            }));
+
+        return {
+            id: camada.id,
+            nome: camada.nome,
+            cercas: cercasDaCamada
+        };
+    });
+
+    res.json(resultado);
+});
+
 // GET todas as cercas com seus pontos (formato simplificado)
 router.get('/', async (req, res) => {
     const cercas = await db.query(`
@@ -101,75 +169,6 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
     await db.query('DELETE FROM cercas WHERE id = $1', [req.params.id]);
     res.sendStatus(204);
-});
-
-// GET cercas agrupadas por camada
-router.get('/camadas/agrupadas', async (req, res) => {
-    const cercas = await db.query(`
-        SELECT c.*, ca.nome AS nome_camada
-        FROM cercas c
-        JOIN camadas ca ON c.camada_id = ca.id
-    `);
-    const pontos = await db.query('SELECT * FROM pontos_cerca');
-
-    const cercasComPontos = cercas.rows.map(cerca => ({
-        id: cerca.id,
-        nome: cerca.nome,
-        tipo: cerca.tipo,
-        cor: cerca.cor,
-        velocidade_max: cerca.velocidade_max,
-        velocidade_chuva: cerca.velocidade_chuva,
-        coordenadas: pontos.rows
-            .filter(p => p.cerca_id === cerca.id)
-            .sort((a, b) => a.ordem - b.ordem)
-            .map(p => [p.latitude, p.longitude])
-    }));
-
-    // Agrupar por camada
-    const agrupadas = {};
-    cercas.rows.forEach(cerca => {
-        const camadaNome = cerca.nome_camada;
-        if (!agrupadas[camadaNome]) {
-            agrupadas[camadaNome] = [];
-        }
-        const cercaInfo = cercasComPontos.find(c => c.id === cerca.id);
-        agrupadas[camadaNome].push(cercaInfo);
-    });
-
-    res.json(agrupadas);
-});
-
-// GET todas as camadas com suas cercas
-router.get('/camadas', async (req, res) => {
-    const camadas = await db.query('SELECT * FROM camadas');
-    const cercas = await db.query('SELECT * FROM cercas');
-    const pontos = await db.query('SELECT * FROM pontos_cerca');
-
-    // Montar estrutura: camadas com suas cercas (e pontos)
-    const resultado = camadas.rows.map(camada => {
-        const cercasDaCamada = cercas.rows
-            .filter(c => c.camada_id === camada.id)
-            .map(cerca => ({
-                id: cerca.id,
-                nome: cerca.nome,
-                tipo: cerca.tipo,
-                cor: cerca.cor,
-                velocidade_max: cerca.velocidade_max,
-                velocidade_chuva: cerca.velocidade_chuva,
-                coordenadas: pontos.rows
-                    .filter(p => p.cerca_id === cerca.id)
-                    .sort((a, b) => a.ordem - b.ordem)
-                    .map(p => [p.latitude, p.longitude])
-            }));
-
-        return {
-            id: camada.id,
-            nome: camada.nome,
-            cercas: cercasDaCamada
-        };
-    });
-
-    res.json(resultado);
 });
 
 export default router;
