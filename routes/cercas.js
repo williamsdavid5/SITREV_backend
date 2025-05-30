@@ -139,4 +139,37 @@ router.get('/camadas/agrupadas', async (req, res) => {
     res.json(agrupadas);
 });
 
+// GET todas as camadas com suas cercas
+router.get('/camadas', async (req, res) => {
+    const camadas = await db.query('SELECT * FROM camadas');
+    const cercas = await db.query('SELECT * FROM cercas');
+    const pontos = await db.query('SELECT * FROM pontos_cerca');
+
+    // Montar estrutura: camadas com suas cercas (e pontos)
+    const resultado = camadas.rows.map(camada => {
+        const cercasDaCamada = cercas.rows
+            .filter(c => c.camada_id === camada.id)
+            .map(cerca => ({
+                id: cerca.id,
+                nome: cerca.nome,
+                tipo: cerca.tipo,
+                cor: cerca.cor,
+                velocidade_max: cerca.velocidade_max,
+                velocidade_chuva: cerca.velocidade_chuva,
+                coordenadas: pontos.rows
+                    .filter(p => p.cerca_id === cerca.id)
+                    .sort((a, b) => a.ordem - b.ordem)
+                    .map(p => [p.latitude, p.longitude])
+            }));
+
+        return {
+            id: camada.id,
+            nome: camada.nome,
+            cercas: cercasDaCamada
+        };
+    });
+
+    res.json(resultado);
+});
+
 export default router;
