@@ -35,6 +35,32 @@ router.put('/:id', async (req, res) => {
     res.json(atualizado.rows[0]);
 });
 
+router.put('/:cerca_id', async (req, res) => {
+    const { cerca_id } = req.params;
+    const { coordenadas } = req.body;
+
+    try {
+        await db.query('BEGIN');
+
+        await db.query('DELETE FROM pontos_cerca WHERE cerca_id = $1', [cerca_id]);
+
+        for (let i = 0; i < coordenadas.length; i++) {
+            const [lat, lng] = coordenadas[i];
+            await db.query(
+                'INSERT INTO pontos_cerca (cerca_id, latitude, longitude, ordem) VALUES ($1, $2, $3, $4)',
+                [cerca_id, lat, lng, i]
+            );
+        }
+
+        await db.query('COMMIT');
+        res.sendStatus(200);
+    } catch (err) {
+        await db.query('ROLLBACK');
+        console.error(err);
+        res.status(500).json({ error: 'Erro ao atualizar pontos da cerca' });
+    }
+});
+
 // DELETE ponto
 router.delete('/:id', async (req, res) => {
     await db.query('DELETE FROM pontos_cerca WHERE id = $1', [req.params.id]);
