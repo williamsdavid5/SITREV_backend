@@ -35,7 +35,7 @@ router.put('/:id', async (req, res) => {
     res.json(atualizado.rows[0]);
 });
 
-router.put('/:cerca_id', async (req, res) => {
+router.put('/atualizar/:cerca_id', async (req, res) => {
     const { cerca_id } = req.params;
     const { coordenadas } = req.body;
 
