@@ -165,10 +165,26 @@ router.put('/:id', async (req, res) => {
     res.json(atualizada.rows[0]);
 });
 
-// DELETE cerca
+// deletar cerca e seus pontos
 router.delete('/:id', async (req, res) => {
-    await db.query('DELETE FROM cercas WHERE id = $1', [req.params.id]);
-    res.sendStatus(204);
+    const { id } = req.params;
+
+    try {
+        await db.query('BEGIN');
+
+        await db.query('DELETE FROM pontos_cerca WHERE cerca_id = $1', [id]);
+
+        await db.query('DELETE FROM cercas WHERE id = $1', [id]);
+
+        await db.query('COMMIT');
+
+        res.sendStatus(204);
+    } catch (err) {
+        await db.query('ROLLBACK');
+        console.error('Erro ao deletar cerca:', err);
+        res.sendStatus(500);
+    }
 });
+
 
 export default router;
