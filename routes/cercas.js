@@ -150,8 +150,13 @@ router.post('/', async (req, res) => {
     }
 
     try {
-        // Corrigir a sequência de IDs
-        await db.query('SELECT setval(pg_get_serial_sequence(\'cercas\', \'id\'), coalesce(max(id), 0) + 1 FROM cercas', []);
+        // Corrigir a sequência de IDs - VERSÃO CORRIGIDA
+        await db.query(`
+            SELECT setval(
+                pg_get_serial_sequence('cercas', 'id'),
+                (SELECT COALESCE(MAX(id), 0) + 1 FROM cercas)
+            )
+        `);
 
         // Cria a cerca
         const nova = await db.query(`
