@@ -137,16 +137,44 @@ router.get('/:id', async (req, res) => {
 
 // POST nova cerca
 router.post('/', async (req, res) => {
-    const { nome, tipo, cor, camada_id, velocidade_max, velocidade_chuva } = req.body;
+    const { nome, tipo, cor, camada_id, velocidade_max, velocidade_chuva, coordenadas } = req.body;
 
-    const nova = await db.query(`
-        INSERT INTO cercas (nome, tipo, cor, camada_id, velocidade_max, velocidade_chuva)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING *
-    `, [nome, tipo, cor, camada_id, velocidade_max, velocidade_chuva]);
+    // Verificação de campos obrigatórios
+    if (!nome || !tipo || !cor || camada_id == null || velocidade_max == null || velocidade_chuva == null || !Array.isArray(coordenadas) || coordenadas.length < 3) {
+        return res.status(400).json({
+            erro: 'Campos obrigatórios ausentes ou inválidos',
+            recebido: {
+                nome, tipo, cor, camada_id, velocidade_max, velocidade_chuva, coordenadas
+            }
+        });
+    }
 
-    res.status(201).json(nova.rows[0]);
+    try {
+        // Cria a cerca
+        const nova = await db.query(`
+            INSERT INTO cercas (nome, tipo, cor, camada_id, velocidade_max, velocidade_chuva)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING *
+        `, [nome, tipo, cor, camada_id, velocidade_max, velocidade_chuva]);
+
+        const cercaCriada = nova.rows[0];
+
+        // Insere os pontos
+        for (let i = 0; i < coordenadas.length; i++) {
+            const [latitude, longitude] = coordenadas[i];
+            await db.query(`
+                INSERT INTO pontos_cerca (cerca_id, latitude, longitude, ordem)
+                VALUES ($1, $2, $3, $4)
+            `, [cercaCriada.id, latitude, longitude, i]);
+        }
+
+        res.status(201).json(cercaCriada);
+    } catch (err) {
+        console.error('Erro ao criar cerca:', err);
+        res.status(500).json({ erro: 'Erro interno ao criar cerca' });
+    }
 });
+
 
 // PUT atualizar cerca
 router.put('/:id', async (req, res) => {
