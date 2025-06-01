@@ -8,6 +8,7 @@ import registrosRoutes from './routes/registros.js';
 import alertasRoutes from './routes/alertas.js';
 import cercasRoutes from './routes/cercas.js';
 import pontosCerca from './routes/pontosCerca.js'
+import camadasRouter from './routes/camadas.js';
 
 dotenv.config();
 
@@ -25,8 +26,11 @@ app.use('/registros', registrosRoutes);
 app.use('/alertas', alertasRoutes);
 app.use('/cercas', cercasRoutes);
 app.use('/pontosCerca', pontosCerca);
+app.use('/camadas', camadasRouter);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
+    const serverUrl = `http://localhost:${PORT}`;
     console.log(`Servidor rodando na porta ${PORT}`);
-})
+    console.log(`Acesse: ${serverUrl}`);
+});
