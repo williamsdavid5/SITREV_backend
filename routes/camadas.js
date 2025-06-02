@@ -61,8 +61,34 @@ router.put('/:id', async (req, res) => {
     res.json(atualizada.rows[0]);
 });
 
-// DELETE camada com deleção manual das cercas associadas
+// DELETE camada (bloqueia se tiver cercas associadas)
 router.delete('/:id', async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        // Verifica se há cercas associadas
+        const cercas = await db.query('SELECT COUNT(*) FROM cercas WHERE camada_id = $1', [id]);
+        const total = parseInt(cercas.rows[0].count);
+
+        if (total > 0) {
+            return res.status(400).json({
+                erro: 'Camada possui cercas associadas e não pode ser excluída',
+                possuiCercas: true
+            });
+        }
+
+        const resultado = await db.query('DELETE FROM camadas WHERE id = $1 RETURNING *', [id]);
+
+        if (resultado.rows.length === 0) return res.sendStatus(404);
+        res.sendStatus(204);
+    } catch (error) {
+        console.error('Erro ao excluir camada:', error);
+        res.status(500).json({ erro: 'Erro ao excluir camada' });
+    }
+});
+
+// DELETE camada com deleção manual das cercas associadas
+router.delete('/force/:id', async (req, res) => {
     const { id } = req.params;
 
     const cercas = await db.query('SELECT id FROM cercas WHERE camada_id = $1', [id]);
