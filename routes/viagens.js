@@ -5,40 +5,88 @@ const router = express.Router();
 
 // Criar viagem
 router.post('/', async (req, res) => {
-    const { motorista_id, inicio, origem_lat, origem_lng } = req.body;
+    const { motorista_id, veiculo_id, inicio, origem_lat, origem_lng } = req.body;
+
+    if (!motorista_id || !veiculo_id || !inicio || origem_lat == null || origem_lng == null) {
+        return res.status(400).json({ erro: 'Campos obrigatórios ausentes' });
+    }
+
     try {
         const result = await db.query(
-            `INSERT INTO viagens (motorista_id, inicio, origem_lat, origem_lng, origem_registrada)
-       VALUES ($1, $2, $3, $4, TRUE) RETURNING *`,
-            [motorista_id, inicio, origem_lat, origem_lng]
+            `INSERT INTO viagens (motorista_id, veiculo_id, inicio, origem_lat, origem_lng, origem_registrada)
+             VALUES ($1, $2, $3, $4, $5, TRUE) RETURNING *`,
+            [motorista_id, veiculo_id, inicio, origem_lat, origem_lng]
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
+        console.error(err);
         res.status(500).json({ erro: 'Erro ao iniciar viagem' });
     }
 });
 
-// Listar todas
+// Listar todas as viagens com info do motorista e veículo
 router.get('/', async (_, res) => {
     try {
-        const result = await db.query('SELECT * FROM viagens');
+        const result = await db.query(`
+            SELECT v.*, 
+                   m.nome AS nome_motorista, 
+                   ve.identificador AS identificador_veiculo, 
+                   ve.modelo AS modelo_veiculo
+            FROM viagens v
+            JOIN motoristas m ON v.motorista_id = m.id
+            JOIN veiculos ve ON v.veiculo_id = ve.id
+        `);
         res.json(result.rows);
     } catch (err) {
+        console.error(err);
         res.status(500).json({ erro: 'Erro ao buscar viagens' });
     }
 });
 
-// Buscar por ID
+// Listar todas as viagens com seus registros
+router.get('/registros', async (req, res) => {
+    try {
+        const { rows: viagens } = await db.query('SELECT * FROM viagens');
+
+        const viagensComRegistros = await Promise.all(
+            viagens.map(async (viagem) => {
+                const { rows: registros } = await db.query(
+                    'SELECT * FROM registros WHERE viagem_id = $1 ORDER BY timestamp ASC',
+                    [viagem.id]
+                );
+
+                return {
+                    ...viagem,
+                    registros,
+                };
+            })
+        );
+
+        res.json(viagensComRegistros);
+    } catch (err) {
+        console.error('Erro ao buscar registros:', err);
+        res.status(500).json({ erro: 'Erro ao buscar registros no banco de dados' });
+    }
+});
+
+// Buscar viagem por ID com detalhes
 router.get('/:id', async (req, res) => {
     try {
-        const result = await db.query('SELECT * FROM viagens WHERE id = $1', [req.params.id]);
+        const result = await db.query(`
+            SELECT v.*, m.nome AS nome_motorista, ve.identificador AS identificador_veiculo, ve.modelo AS modelo_veiculo
+            FROM viagens v
+            JOIN motoristas m ON v.motorista_id = m.id
+            JOIN veiculos ve ON v.veiculo_id = ve.id
+            WHERE v.id = $1
+        `, [req.params.id]);
         res.json(result.rows[0] || {});
     } catch (err) {
+        console.error(err);
         res.status(500).json({ erro: 'Erro ao buscar viagem' });
     }
 });
 
-// Atualizar
+// Atualizar viagem
 router.put('/:id', async (req, res) => {
     const { fim, destino_lat, destino_lng, chuva_detectada } = req.body;
     try {
@@ -48,16 +96,18 @@ router.put('/:id', async (req, res) => {
         );
         res.json(result.rows[0]);
     } catch (err) {
+        console.error(err);
         res.status(500).json({ erro: 'Erro ao atualizar viagem' });
     }
 });
 
-// Deletar
+// Deletar viagem
 router.delete('/:id', async (req, res) => {
     try {
         await db.query('DELETE FROM viagens WHERE id = $1', [req.params.id]);
         res.json({ mensagem: 'Viagem deletada' });
     } catch (err) {
+        console.error(err);
         res.status(500).json({ erro: 'Erro ao deletar viagem' });
     }
 });
