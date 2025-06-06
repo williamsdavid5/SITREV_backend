@@ -43,15 +43,22 @@ router.get('/', async (_, res) => {
     }
 });
 
-// Listar todas as viagens com seus registros
 router.get('/registros', async (req, res) => {
     try {
-        const { rows: viagens } = await db.query('SELECT * FROM viagens');
+        const { rows: viagens } = await db.query(`
+            SELECT v.*, 
+                   m.nome AS nome_motorista, 
+                   ve.identificador AS veiculo_identificador,
+                   ve.modelo AS veiculo_modelo
+            FROM viagens v
+            JOIN motoristas m ON v.motorista_id = m.id
+            JOIN veiculos ve ON v.veiculo_id = ve.id
+        `);
 
         const viagensComRegistros = await Promise.all(
             viagens.map(async (viagem) => {
                 const { rows: registros } = await db.query(
-                    'SELECT * FROM registros WHERE viagem_id = $1 ORDER BY timestamp ASC',
+                    'SELECT * FROM registros WHERE viagem_id = $1',
                     [viagem.id]
                 );
 
