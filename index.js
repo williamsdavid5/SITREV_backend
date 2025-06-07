@@ -9,6 +9,7 @@ import alertasRoutes from './routes/alertas.js';
 import cercasRoutes from './routes/cercas.js';
 import pontosCerca from './routes/pontosCerca.js'
 import camadasRouter from './routes/camadas.js';
+import veiculosRouter from './routes/veiculos.js'
 
 dotenv.config();
 
@@ -27,6 +28,7 @@ app.use('/alertas', alertasRoutes);
 app.use('/cercas', cercasRoutes);
 app.use('/pontosCerca', pontosCerca);
 app.use('/camadas', camadasRouter);
+app.use('/veiculos', veiculosRouter);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
