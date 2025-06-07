@@ -3,26 +3,68 @@ import db from '../db.js';
 
 const router = express.Router();
 
-//listar todos
-router.get('/', async (requestAnimationFrame, res) => {
+// Listar todos os motoristas com viagens e alertas
+router.get('/', async (_, res) => {
     try {
-        const result = await db.query('SELECT * FROM motoristas');
-        res.json(result.rows);
+        const { rows: motoristas } = await db.query('SELECT * FROM motoristas');
+
+        const motoristasComDetalhes = await Promise.all(
+            motoristas.map(async (motorista) => {
+                const { rows: viagens } = await db.query(
+                    'SELECT * FROM viagens WHERE motorista_id = $1',
+                    [motorista.id]
+                );
+
+                const { rows: alertas } = await db.query(
+                    `SELECT a.* FROM alertas a
+                     JOIN viagens v ON a.viagem_id = v.id
+                     WHERE v.motorista_id = $1`,
+                    [motorista.id]
+                );
+
+                return {
+                    ...motorista,
+                    viagens,
+                    alertas,
+                };
+            })
+        );
+
+        res.json(motoristasComDetalhes);
     } catch (err) {
         res.status(500).json({ erro: `Erro ao buscar motoristas: ${err}` });
     }
 });
 
-//buscar com id
+// Buscar um motorista por ID com viagens e alertas
 router.get('/:id', async (req, res) => {
     try {
-        const result = await db.query('SELECT * FROM motoristas WHERE id = $1', [req.params.id]);
-        if (result.rows.length === 0) return res.status(404).json({ erro: 'Motorista não encontrado' });
-        res.json(result.rows[0]);
+        const { rows } = await db.query('SELECT * FROM motoristas WHERE id = $1', [req.params.id]);
+        if (rows.length === 0) return res.status(404).json({ erro: 'Motorista não encontrado' });
+
+        const motorista = rows[0];
+
+        const { rows: viagens } = await db.query(
+            'SELECT * FROM viagens WHERE motorista_id = $1',
+            [motorista.id]
+        );
+
+        const { rows: alertas } = await db.query(
+            `SELECT a.* FROM alertas a
+             JOIN viagens v ON a.viagem_id = v.id
+             WHERE v.motorista_id = $1`,
+            [motorista.id]
+        );
+
+        res.json({
+            ...motorista,
+            viagens,
+            alertas,
+        });
     } catch (err) {
         res.status(500).json({ erro: `Erro ao buscar o motorista id ${req.params.id}: ${err}` });
     }
-})
+});
 
 //criar motorista
 router.post('/', async (req, res) => {
