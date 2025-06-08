@@ -3,6 +3,115 @@ import db from '../db.js';
 
 const router = express.Router();
 
+//rotas leves para evitar receber todos os dados de uma vez
+//enviam informações dos motoristas, mas também alguns dados uteis sobre ultimas viagens
+router.get('/limpo', async (_, res) => {
+    try {
+        const { rows: motoristas } = await db.query('SELECT * FROM motoristas');
+
+        const motoristasComUltimaLeitura = await Promise.all(
+            motoristas.map(async (motorista) => {
+                // Última viagem (ordem decrescente por início)
+                const { rows: [ultimaViagem] } = await db.query(
+                    `SELECT * FROM viagens 
+                     WHERE motorista_id = $1 
+                     ORDER BY inicio DESC 
+                     LIMIT 1`,
+                    [motorista.id]
+                );
+
+                let ultimaLeitura = null;
+                let status = 'parado';
+
+                if (ultimaViagem) {
+                    const { rows: [registro] } = await db.query(
+                        `SELECT * FROM registros 
+                         WHERE viagem_id = $1 
+                         ORDER BY timestamp DESC 
+                         LIMIT 1`,
+                        [ultimaViagem.id]
+                    );
+
+                    if (registro) {
+                        ultimaLeitura = {
+                            horario: registro.timestamp,
+                            latitude: registro.latitude,
+                            longitude: registro.longitude,
+                            velocidade: registro.velocidade,
+                        };
+                    }
+
+                    if (!ultimaViagem.fim) {
+                        status = 'em_movimento';
+                    }
+                }
+
+                return {
+                    ...motorista,
+                    status,
+                    ultimaLeitura,
+                };
+            })
+        );
+
+        res.json(motoristasComUltimaLeitura);
+    } catch (err) {
+        res.status(500).json({ erro: `Erro ao buscar motoristas: ${err}` });
+    }
+});
+
+router.get('/limpo/:id', async (req, res) => {
+    try {
+        const { rows } = await db.query('SELECT * FROM motoristas WHERE id = $1', [req.params.id]);
+        if (rows.length === 0) return res.status(404).json({ erro: 'Motorista não encontrado' });
+
+        const motorista = rows[0];
+
+        const { rows: [ultimaViagem] } = await db.query(
+            `SELECT * FROM viagens 
+             WHERE motorista_id = $1 
+             ORDER BY inicio DESC 
+             LIMIT 1`,
+            [motorista.id]
+        );
+
+        let ultimaLeitura = null;
+        let status = 'parado';
+
+        if (ultimaViagem) {
+            const { rows: [registro] } = await db.query(
+                `SELECT * FROM registros 
+                 WHERE viagem_id = $1 
+                 ORDER BY timestamp DESC 
+                 LIMIT 1`,
+                [ultimaViagem.id]
+            );
+
+            if (registro) {
+                ultimaLeitura = {
+                    horario: registro.timestamp,
+                    latitude: registro.latitude,
+                    longitude: registro.longitude,
+                    velocidade: registro.velocidade,
+                };
+            }
+
+            if (!ultimaViagem.fim) {
+                status = 'em_movimento';
+            }
+        }
+
+        res.json({
+            ...motorista,
+            status,
+            ultimaLeitura,
+        });
+    } catch (err) {
+        res.status(500).json({ erro: `Erro ao buscar o motorista id ${req.params.id}: ${err}` });
+    }
+});
+
+
 // Listar todos os motoristas com viagens e alertas
 router.get('/', async (_, res) => {
     try {
