@@ -10,11 +10,13 @@ router.get('/', async (_, res) => {
 
         const motoristasComDetalhes = await Promise.all(
             motoristas.map(async (motorista) => {
+                // Buscar viagens do motorista
                 const { rows: viagens } = await db.query(
                     'SELECT * FROM viagens WHERE motorista_id = $1',
                     [motorista.id]
                 );
 
+                // Buscar alertas do motorista
                 const { rows: alertas } = await db.query(
                     `SELECT a.* FROM alertas a
                      JOIN viagens v ON a.viagem_id = v.id
@@ -22,10 +24,24 @@ router.get('/', async (_, res) => {
                     [motorista.id]
                 );
 
+                // Para cada viagem, buscar registros
+                const viagensComRegistros = await Promise.all(
+                    viagens.map(async (viagem) => {
+                        const { rows: registros } = await db.query(
+                            'SELECT * FROM registros WHERE viagem_id = $1 ORDER BY timestamp ASC',
+                            [viagem.id]
+                        );
+                        return {
+                            ...viagem,
+                            registros
+                        };
+                    })
+                );
+
                 return {
                     ...motorista,
-                    viagens,
-                    alertas,
+                    viagens: viagensComRegistros,
+                    alertas
                 };
             })
         );
@@ -35,6 +51,7 @@ router.get('/', async (_, res) => {
         res.status(500).json({ erro: `Erro ao buscar motoristas: ${err}` });
     }
 });
+
 
 // Buscar um motorista por ID com viagens e alertas
 router.get('/:id', async (req, res) => {
@@ -56,15 +73,30 @@ router.get('/:id', async (req, res) => {
             [motorista.id]
         );
 
+        // Buscar registros para cada viagem
+        const viagensComRegistros = await Promise.all(
+            viagens.map(async (viagem) => {
+                const { rows: registros } = await db.query(
+                    'SELECT * FROM registros WHERE viagem_id = $1 ORDER BY timestamp ASC',
+                    [viagem.id]
+                );
+                return {
+                    ...viagem,
+                    registros
+                };
+            })
+        );
+
         res.json({
             ...motorista,
-            viagens,
-            alertas,
+            viagens: viagensComRegistros,
+            alertas
         });
     } catch (err) {
         res.status(500).json({ erro: `Erro ao buscar o motorista id ${req.params.id}: ${err}` });
     }
 });
+
 
 //criar motorista
 router.post('/', async (req, res) => {
