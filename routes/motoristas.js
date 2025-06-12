@@ -126,12 +126,29 @@ router.get('/', async (_, res) => {
                 );
 
                 // Buscar alertas do motorista
-                const { rows: alertas } = await db.query(
+                const { rows: alertasBase } = await db.query(
                     `SELECT a.* FROM alertas a
-                     JOIN viagens v ON a.viagem_id = v.id
-                     WHERE v.motorista_id = $1`,
+     JOIN viagens v ON a.viagem_id = v.id
+     WHERE v.motorista_id = $1`,
                     [motorista.id]
                 );
+
+                const alertas = await Promise.all(alertasBase.map(async (alerta) => {
+                    const { rows: registros } = await db.query(
+                        `SELECT r.latitude, r.longitude, r.timestamp, r.velocidade
+         FROM registros_alertas ra
+         JOIN registros r ON ra.registro_id = r.id
+         WHERE ra.alerta_id = $1
+         ORDER BY r.timestamp ASC`,
+                        [alerta.id]
+                    );
+
+                    return {
+                        ...alerta,
+                        registroCoordenadas: registros
+                    };
+                }));
+
 
                 // Para cada viagem, buscar registros
                 const viagensComRegistros = await Promise.all(
@@ -175,12 +192,29 @@ router.get('/:id', async (req, res) => {
             [motorista.id]
         );
 
-        const { rows: alertas } = await db.query(
+        const { rows: alertasBase } = await db.query(
             `SELECT a.* FROM alertas a
-             JOIN viagens v ON a.viagem_id = v.id
-             WHERE v.motorista_id = $1`,
+     JOIN viagens v ON a.viagem_id = v.id
+     WHERE v.motorista_id = $1`,
             [motorista.id]
         );
+
+        const alertas = await Promise.all(alertasBase.map(async (alerta) => {
+            const { rows: registros } = await db.query(
+                `SELECT r.latitude, r.longitude, r.timestamp, r.velocidade
+         FROM registros_alertas ra
+         JOIN registros r ON ra.registro_id = r.id
+         WHERE ra.alerta_id = $1
+         ORDER BY r.timestamp ASC`,
+                [alerta.id]
+            );
+
+            return {
+                ...alerta,
+                registroCoordenadas: registros
+            };
+        }));
+
 
         // Buscar registros para cada viagem
         const viagensComRegistros = await Promise.all(
