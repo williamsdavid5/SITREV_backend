@@ -3,6 +3,28 @@ import db from '../db.js';
 
 const router = express.Router();
 
+// Listar viagens com dados resumidos
+router.get('/limpo', async (_, res) => {
+    try {
+        const result = await db.query(`
+            SELECT 
+                v.id,
+                v.inicio::date AS data_viagem,
+                m.nome AS nome_motorista,
+                ve.identificador AS identificador_veiculo
+            FROM viagens v
+            JOIN motoristas m ON v.motorista_id = m.id
+            JOIN veiculos ve ON v.veiculo_id = ve.id
+            ORDER BY v.inicio DESC
+        `);
+
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Erro ao buscar viagens resumidas:', err);
+        res.status(500).json({ erro: 'Erro ao buscar viagens' });
+    }
+});
+
 // Criar viagem
 router.post('/', async (req, res) => {
     const { motorista_id, veiculo_id, inicio, origem_lat, origem_lng } = req.body;
