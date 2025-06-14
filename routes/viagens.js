@@ -98,22 +98,46 @@ router.get('/registros', async (req, res) => {
     }
 });
 
-// Buscar viagem por ID com detalhes
+// Buscar viagem por ID com detalhes, registros e alertas
 router.get('/:id', async (req, res) => {
+    const viagemId = req.params.id;
+
     try {
-        const result = await db.query(`
+        const { rows: viagemRows } = await db.query(`
             SELECT v.*, m.nome AS nome_motorista, ve.identificador AS identificador_veiculo, ve.modelo AS modelo_veiculo
             FROM viagens v
             JOIN motoristas m ON v.motorista_id = m.id
             JOIN veiculos ve ON v.veiculo_id = ve.id
             WHERE v.id = $1
-        `, [req.params.id]);
-        res.json(result.rows[0] || {});
+        `, [viagemId]);
+
+        if (viagemRows.length === 0) {
+            return res.status(404).json({ erro: 'Viagem não encontrada' });
+        }
+
+        const viagem = viagemRows[0];
+
+        const { rows: registros } = await db.query(
+            `SELECT * FROM registros WHERE viagem_id = $1 ORDER BY timestamp`,
+            [viagemId]
+        );
+
+        const { rows: alertas } = await db.query(
+            `SELECT * FROM alertas WHERE viagem_id = $1 ORDER BY timestamp`,
+            [viagemId]
+        );
+
+        res.json({
+            ...viagem,
+            registros,
+            alertas
+        });
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ erro: 'Erro ao buscar viagem' });
+        console.error('Erro ao buscar viagem detalhada:', err);
+        res.status(500).json({ erro: 'Erro ao buscar dados da viagem' });
     }
 });
+
 
 // Atualizar viagem
 router.put('/:id', async (req, res) => {
