@@ -3,7 +3,7 @@ import db from '../db.js';
 
 const router = express.Router();
 
-// Listar viagens com dados resumidos
+// Listar viagens com dados resumidos e quantidade de alertas
 router.get('/limpo', async (_, res) => {
     try {
         const result = await db.query(`
@@ -11,10 +11,13 @@ router.get('/limpo', async (_, res) => {
                 v.id,
                 v.inicio::date AS data_viagem,
                 m.nome AS nome_motorista,
-                ve.identificador AS identificador_veiculo
+                ve.identificador AS identificador_veiculo,
+                COUNT(a.id) AS quantidade_alertas
             FROM viagens v
             JOIN motoristas m ON v.motorista_id = m.id
             JOIN veiculos ve ON v.veiculo_id = ve.id
+            LEFT JOIN alertas a ON a.viagem_id = v.id
+            GROUP BY v.id, m.nome, ve.identificador, v.inicio
             ORDER BY v.inicio DESC
         `);
 
