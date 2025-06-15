@@ -101,7 +101,7 @@ router.get('/registros', async (req, res) => {
     }
 });
 
-// Buscar viagem por ID com detalhes, registros e alertas
+// Buscar viagem por ID com detalhes, registros e alertas com ponto
 router.get('/:id', async (req, res) => {
     const viagemId = req.params.id;
 
@@ -130,16 +130,35 @@ router.get('/:id', async (req, res) => {
             [viagemId]
         );
 
+        const alertasComRegistros = await Promise.all(
+            alertas.map(async (alerta) => {
+                const { rows: registrosDoAlerta } = await db.query(`
+                    SELECT r.*
+                    FROM registros_alertas ra
+                    JOIN registros r ON ra.registro_id = r.id
+                    WHERE ra.alerta_id = $1
+                    ORDER BY r.timestamp
+                `, [alerta.id]);
+
+                return {
+                    ...alerta,
+                    registros: registrosDoAlerta
+                };
+            })
+        );
+
         res.json({
             ...viagem,
             registros,
-            alertas
+            alertas: alertasComRegistros
         });
+
     } catch (err) {
         console.error('Erro ao buscar viagem detalhada:', err);
         res.status(500).json({ erro: 'Erro ao buscar dados da viagem' });
     }
 });
+
 
 
 // Atualizar viagem
