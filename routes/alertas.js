@@ -8,6 +8,7 @@ router.get('/limpo', async (_, res) => {
     try {
         const { rows } = await db.query(`
             SELECT 
+                a.id AS alerta_id,
                 a.timestamp AS data_hora,
                 m.nome AS nome_motorista,
                 ve.identificador AS veiculo_identificador,
