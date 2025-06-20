@@ -3,13 +3,12 @@ import db from '../db.js';
 
 const router = express.Router();
 
-// Listar viagens com dados resumidos, quantidade de alertas e modelo do veículo
 router.get('/limpo', async (_, res) => {
     try {
         const result = await db.query(`
             SELECT 
                 v.id,
-                v.inicio::date AS data_viagem,
+                v.inicio AS data_viagem, -- mantém o timestamp completo
                 m.nome AS nome_motorista,
                 ve.identificador AS identificador_veiculo,
                 ve.modelo AS modelo_veiculo,
@@ -28,6 +27,7 @@ router.get('/limpo', async (_, res) => {
         res.status(500).json({ erro: 'Erro ao buscar viagens' });
     }
 });
+
 
 // Criar viagem
 router.post('/', async (req, res) => {
