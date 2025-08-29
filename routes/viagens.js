@@ -1,6 +1,8 @@
 import express from 'express';
 import db from '../db.js';
 
+import { DateTime } from 'luxon';
+
 const router = express.Router();
 
 router.get('/limpo', async (_, res) => {
@@ -177,15 +179,125 @@ router.put('/:id', async (req, res) => {
     }
 });
 
-// Deletar viagem
+
+// Deletar viagem e todos os registros relacionados
 router.delete('/:id', async (req, res) => {
+    const client = await db.connect();
+
     try {
-        await db.query('DELETE FROM viagens WHERE id = $1', [req.params.id]);
-        res.json({ mensagem: 'Viagem deletada' });
+        await client.query('BEGIN');
+
+        await client.query(`
+            DELETE FROM registros_alertas 
+            WHERE alerta_id IN (
+                SELECT id FROM alertas WHERE viagem_id = $1
+            )
+        `, [req.params.id]);
+
+        await client.query('DELETE FROM alertas WHERE viagem_id = $1', [req.params.id]);
+
+        await client.query('DELETE FROM registros WHERE viagem_id = $1', [req.params.id]);
+
+        await client.query('DELETE FROM viagens WHERE id = $1', [req.params.id]);
+
+        await client.query('COMMIT');
+        res.json({ mensagem: 'Viagem e todos os registros relacionados deletados com sucesso' });
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ erro: 'Erro ao deletar viagem' });
+        await client.query('ROLLBACK');
+        console.error('Erro ao deletar viagem:', err);
+        res.status(500).json({
+            erro: 'Erro ao deletar viagem',
+            detalhes: err.message
+        });
+    } finally {
+        client.release();
     }
 });
+
+// ------------------ lógica para registros de viajens --------------------------
+// essa rota é para sincronizar os registros recebvidos
+
+function converterParaBrasilia(dataUtc) {
+    return DateTime.fromISO(dataUtc, { zone: 'utc' })
+        .setZone('America/Sao_Paulo')
+        .toISO({ suppressMilliseconds: true });
+}
+
+router.post('/registrar-viagem', async (req, res) => {
+    const dados = req.body;
+
+    if (!dados || !Array.isArray(dados.registros) || dados.registros.length === 0) {
+        return res.status(400).json({ erro: 'JSON inválido ou sem registros' });
+    }
+
+    try {
+        // Converter timestamps para fuso do Brasil
+        const inicio = converterParaBrasilia(dados.registros[0].timestamp);
+        const fim = converterParaBrasilia(dados.registros[dados.registros.length - 1].timestamp);
+
+        // Origem
+        const origem_lat = dados.registros[0].lat;
+        const origem_lng = dados.registros[0].lng;
+
+        // Destino
+        const destino_lat = dados.registros[dados.registros.length - 1].lat;
+        const destino_lng = dados.registros[dados.registros.length - 1].lng;
+
+        // Verificar chuva
+        const chuva_detectada = dados.registros.some(r => r.chuva === true);
+
+        // Inserir viagem
+        const viagemResult = await db.query(
+            `INSERT INTO viagens (motorista_id, veiculo_id, inicio, fim, origem_lat, origem_lng, destino_lat, destino_lng, chuva_detectada, id_referencia)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+             RETURNING id`,
+            [
+                dados.motorista_id,
+                dados.veiculo_id,
+                inicio,
+                fim,
+                origem_lat,
+                origem_lng,
+                destino_lat,
+                destino_lng,
+                chuva_detectada,
+                dados.viagem_id || null
+            ]
+        );
+
+        const viagemId = viagemResult.rows[0].id;
+
+        // Inserir registros
+        const insertRegistros = dados.registros.map(r => ({
+            ...r,
+            timestamp: converterParaBrasilia(r.timestamp)
+        }));
+
+        for (const r of insertRegistros) {
+            await db.query(
+                `INSERT INTO registros (viagem_id, veiculo_id, timestamp, latitude, longitude, velocidade, chuva)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+                [
+                    viagemId,
+                    dados.veiculo_id,
+                    r.timestamp,
+                    r.lat,
+                    r.lng,
+                    r.vel,
+                    r.chuva
+                ]
+            );
+        }
+
+        res.json({ sucesso: true, viagem_id: viagemId });
+    } catch (err) {
+        console.error('Erro ao registrar viagem:', err);
+        res.status(500).json({ erro: 'Erro ao registrar viagem' });
+    }
+});
+
+
+
+
 
 export default router;
