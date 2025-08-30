@@ -228,15 +228,29 @@ router.delete('/:id', async (req, res) => {
 // }
 
 // encontra primeiro e último registros VÁLIDOS
+function toBrasiliaOrNull(iso) {
+    if (!iso) return null;
+
+    const dt = DateTime.fromISO(iso, { setZone: true }); // respeita 'Z' do ISO
+    if (!dt.isValid) return null;
+
+    return dt.setZone('America/Sao_Paulo').toISO({ suppressMilliseconds: true });
+}
+
+// encontra primeiro registro VÁLIDO
 function firstValid(registros) {
     for (let i = 0; i < registros.length; i++) {
-        if (registros[i].timestamp) return { idx: i, ts: registros[i].timestamp };
+        const ts = toBrasiliaOrNull(registros[i].timestamp);
+        if (ts) return { idx: i, ts };
     }
     return null;
 }
+
+// encontra último registro VÁLIDO
 function lastValid(registros) {
     for (let i = registros.length - 1; i >= 0; i--) {
-        if (registros[i].timestamp) return { idx: i, ts: registros[i].timestamp };
+        const ts = toBrasiliaOrNull(registros[i].timestamp);
+        if (ts) return { idx: i, ts };
     }
     return null;
 }
@@ -249,6 +263,7 @@ router.post('/registrar-viagem', async (req, res) => {
     }
 
     try {
+        // calcula início/fim/dados de origem/destino a partir de registros VÁLIDOS
         const ini = firstValid(dados.registros);
         const fimv = lastValid(dados.registros);
 
@@ -258,9 +273,9 @@ router.post('/registrar-viagem', async (req, res) => {
 
         const origem = dados.registros[ini.idx];
         const destino = dados.registros[fimv.idx];
-
         let viagemId;
 
+        // procura viagem por id_referencia
         const viagemExistente = await db.query(
             'SELECT id, chuva_detectada FROM viagens WHERE id_referencia = $1',
             [dados.viagem_id]
@@ -269,24 +284,24 @@ router.post('/registrar-viagem', async (req, res) => {
         const chuva_detectada = dados.registros.some(r => r.chuva === true);
 
         if (viagemExistente.rows.length > 0) {
-
+            // já existe → atualiza fim/destino/chuva (sem regredir fim)
             viagemId = viagemExistente.rows[0].id;
             await db.query(
                 `UPDATE viagens
-           SET fim = GREATEST(COALESCE(fim, $1), $1),
-               destino_lat = $2,
-               destino_lng = $3,
-               chuva_detectada = COALESCE(chuva_detectada, false) OR $4
-         WHERE id = $5`,
+                 SET fim = GREATEST(COALESCE(fim, $1), $1),
+                     destino_lat = $2,
+                     destino_lng = $3,
+                     chuva_detectada = COALESCE(chuva_detectada, false) OR $4
+                 WHERE id = $5`,
                 [fimv.ts, destino.lat, destino.lng, chuva_detectada, viagemId]
             );
         } else {
-
+            // cria nova viagem (inicio = primeiro registro VÁLIDO)
             const viagemResult = await db.query(
                 `INSERT INTO viagens
-          (motorista_id, veiculo_id, inicio, fim, origem_lat, origem_lng, destino_lat, destino_lng, chuva_detectada, id_referencia)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-         RETURNING id`,
+                 (motorista_id, veiculo_id, inicio, fim, origem_lat, origem_lng, destino_lat, destino_lng, chuva_detectada, id_referencia)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                 RETURNING id`,
                 [
                     dados.motorista_id,
                     dados.veiculo_id,
@@ -303,17 +318,20 @@ router.post('/registrar-viagem', async (req, res) => {
             viagemId = viagemResult.rows[0].id;
         }
 
+        // monta INSERT em lote apenas com registros de timestamp válido
         const values = [];
         const params = [];
         let i = 1;
 
         for (const r of dados.registros) {
-            if (!r.timestamp) continue;
+            const ts = toBrasiliaOrNull(r.timestamp);
+            if (!ts) continue; // ignora inválidos
+
             values.push(`($${i}, $${i + 1}, $${i + 2}, $${i + 3}, $${i + 4}, $${i + 5}, $${i + 6})`);
             params.push(
                 viagemId,
                 dados.veiculo_id,
-                r.timestamp,
+                ts,
                 r.lat,
                 r.lng,
                 r.vel,
@@ -325,13 +343,14 @@ router.post('/registrar-viagem', async (req, res) => {
         if (values.length > 0) {
             await db.query(
                 `INSERT INTO registros (viagem_id, veiculo_id, timestamp, latitude, longitude, velocidade, chuva)
-         VALUES ${values.join(',')}
-         ON CONFLICT DO NOTHING`,
+                 VALUES ${values.join(',')}
+                 ON CONFLICT DO NOTHING`,
                 params
             );
         }
 
         res.json({ sucesso: true, viagem_id: viagemId });
+
     } catch (err) {
         console.error('Erro ao registrar viagem:', err);
         res.status(500).json({ erro: 'Erro ao registrar viagem' });
