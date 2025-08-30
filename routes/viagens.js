@@ -7,10 +7,10 @@ const router = express.Router();
 
 router.get('/limpo', async (_, res) => {
     try {
-        const result = await db.query(`
+        const query = `
             SELECT 
                 v.id,
-                v.inicio AS data_viagem, -- mantém o timestamp completo
+                v.inicio AS data_viagem, 
                 m.nome AS nome_motorista,
                 ve.identificador AS identificador_veiculo,
                 ve.modelo AS modelo_veiculo,
@@ -19,11 +19,13 @@ router.get('/limpo', async (_, res) => {
             JOIN motoristas m ON v.motorista_id = m.id
             JOIN veiculos ve ON v.veiculo_id = ve.id
             LEFT JOIN alertas a ON a.viagem_id = v.id
-            GROUP BY v.id, m.nome, ve.identificador, ve.modelo, v.inicio
+            GROUP BY v.id, v.inicio, m.nome, ve.identificador, ve.modelo
             ORDER BY v.inicio DESC
-        `);
+        `;
 
-        res.json(result.rows);
+        const { rows } = await db.query(query);
+
+        res.status(200).json(rows);
     } catch (err) {
         console.error('Erro ao buscar viagens resumidas:', err);
         res.status(500).json({ erro: 'Erro ao buscar viagens' });
@@ -217,10 +219,26 @@ router.delete('/:id', async (req, res) => {
 // ------------------ lógica para registros de viajens --------------------------
 // essa rota é para sincronizar os registros recebvidos
 
-function converterParaBrasilia(dataUtc) {
-    return DateTime.fromISO(dataUtc, { zone: 'utc' })
-        .setZone('America/Sao_Paulo')
-        .toISO({ suppressMilliseconds: true });
+// helper: parse para Brasília; retorna null se inválido
+// function toBrasiliaOrNull(iso) {
+//     if (!iso) return null;
+//     const dt = DateTime.fromISO(iso, { setZone: true }); // respeita 'Z' do ISO
+//     if (!dt.isValid) return null;
+//     return dt.setZone('America/Sao_Paulo').toISO({ suppressMilliseconds: true });
+// }
+
+// encontra primeiro e último registros VÁLIDOS
+function firstValid(registros) {
+    for (let i = 0; i < registros.length; i++) {
+        if (registros[i].timestamp) return { idx: i, ts: registros[i].timestamp };
+    }
+    return null;
+}
+function lastValid(registros) {
+    for (let i = registros.length - 1; i >= 0; i--) {
+        if (registros[i].timestamp) return { idx: i, ts: registros[i].timestamp };
+    }
+    return null;
 }
 
 router.post('/registrar-viagem', async (req, res) => {
@@ -231,61 +249,85 @@ router.post('/registrar-viagem', async (req, res) => {
     }
 
     try {
-        // Converter timestamps para fuso do Brasil
-        const inicio = converterParaBrasilia(dados.registros[0].timestamp);
-        const fim = converterParaBrasilia(dados.registros[dados.registros.length - 1].timestamp);
+        const ini = firstValid(dados.registros);
+        const fimv = lastValid(dados.registros);
 
-        // Origem
-        const origem_lat = dados.registros[0].lat;
-        const origem_lng = dados.registros[0].lng;
+        if (!ini || !fimv) {
+            return res.status(400).json({ erro: 'Nenhum timestamp válido encontrado nos registros' });
+        }
 
-        // Destino
-        const destino_lat = dados.registros[dados.registros.length - 1].lat;
-        const destino_lng = dados.registros[dados.registros.length - 1].lng;
+        const origem = dados.registros[ini.idx];
+        const destino = dados.registros[fimv.idx];
 
-        // Verificar chuva
-        const chuva_detectada = dados.registros.some(r => r.chuva === true);
+        let viagemId;
 
-        // Inserir viagem
-        const viagemResult = await db.query(
-            `INSERT INTO viagens (motorista_id, veiculo_id, inicio, fim, origem_lat, origem_lng, destino_lat, destino_lng, chuva_detectada, id_referencia)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-             RETURNING id`,
-            [
-                dados.motorista_id,
-                dados.veiculo_id,
-                inicio,
-                fim,
-                origem_lat,
-                origem_lng,
-                destino_lat,
-                destino_lng,
-                chuva_detectada,
-                dados.viagem_id || null
-            ]
+        const viagemExistente = await db.query(
+            'SELECT id, chuva_detectada FROM viagens WHERE id_referencia = $1',
+            [dados.viagem_id]
         );
 
-        const viagemId = viagemResult.rows[0].id;
+        const chuva_detectada = dados.registros.some(r => r.chuva === true);
 
-        // Inserir registros
-        const insertRegistros = dados.registros.map(r => ({
-            ...r,
-            timestamp: converterParaBrasilia(r.timestamp)
-        }));
+        if (viagemExistente.rows.length > 0) {
 
-        for (const r of insertRegistros) {
+            viagemId = viagemExistente.rows[0].id;
+            await db.query(
+                `UPDATE viagens
+           SET fim = GREATEST(COALESCE(fim, $1), $1),
+               destino_lat = $2,
+               destino_lng = $3,
+               chuva_detectada = COALESCE(chuva_detectada, false) OR $4
+         WHERE id = $5`,
+                [fimv.ts, destino.lat, destino.lng, chuva_detectada, viagemId]
+            );
+        } else {
+
+            const viagemResult = await db.query(
+                `INSERT INTO viagens
+          (motorista_id, veiculo_id, inicio, fim, origem_lat, origem_lng, destino_lat, destino_lng, chuva_detectada, id_referencia)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         RETURNING id`,
+                [
+                    dados.motorista_id,
+                    dados.veiculo_id,
+                    ini.ts,
+                    fimv.ts,
+                    origem.lat,
+                    origem.lng,
+                    destino.lat,
+                    destino.lng,
+                    chuva_detectada,
+                    dados.viagem_id
+                ]
+            );
+            viagemId = viagemResult.rows[0].id;
+        }
+
+        const values = [];
+        const params = [];
+        let i = 1;
+
+        for (const r of dados.registros) {
+            if (!r.timestamp) continue;
+            values.push(`($${i}, $${i + 1}, $${i + 2}, $${i + 3}, $${i + 4}, $${i + 5}, $${i + 6})`);
+            params.push(
+                viagemId,
+                dados.veiculo_id,
+                r.timestamp,
+                r.lat,
+                r.lng,
+                r.vel,
+                r.chuva
+            );
+            i += 7;
+        }
+
+        if (values.length > 0) {
             await db.query(
                 `INSERT INTO registros (viagem_id, veiculo_id, timestamp, latitude, longitude, velocidade, chuva)
-                 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-                [
-                    viagemId,
-                    dados.veiculo_id,
-                    r.timestamp,
-                    r.lat,
-                    r.lng,
-                    r.vel,
-                    r.chuva
-                ]
+         VALUES ${values.join(',')}
+         ON CONFLICT DO NOTHING`,
+                params
             );
         }
 
