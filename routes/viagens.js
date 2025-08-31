@@ -284,7 +284,6 @@ router.post('/registrar-viagem', async (req, res) => {
         const chuva_detectada = dados.registros.some(r => r.chuva === true);
 
         if (viagemExistente.rows.length > 0) {
-            // já existe → atualiza fim/destino/chuva (sem regredir fim)
             viagemId = viagemExistente.rows[0].id;
             await db.query(
                 `UPDATE viagens
@@ -296,7 +295,6 @@ router.post('/registrar-viagem', async (req, res) => {
                 [fimv.ts, destino.lat, destino.lng, chuva_detectada, viagemId]
             );
         } else {
-            // cria nova viagem (inicio = primeiro registro VÁLIDO)
             const viagemResult = await db.query(
                 `INSERT INTO viagens
                  (motorista_id, veiculo_id, inicio, fim, origem_lat, origem_lng, destino_lat, destino_lng, chuva_detectada, id_referencia)
@@ -323,33 +321,81 @@ router.post('/registrar-viagem', async (req, res) => {
         const params = [];
         let i = 1;
 
+        const registrosValidos = []; // armazenar os registros válidos
+
         for (const r of dados.registros) {
             const ts = toBrasiliaOrNull(r.timestamp);
-            if (!ts) continue; // ignora inválidos
+            if (!ts) continue;
 
             values.push(`($${i}, $${i + 1}, $${i + 2}, $${i + 3}, $${i + 4}, $${i + 5}, $${i + 6})`);
-            params.push(
-                viagemId,
-                dados.veiculo_id,
-                ts,
-                r.lat,
-                r.lng,
-                r.vel,
-                r.chuva
-            );
+            params.push(viagemId, dados.veiculo_id, ts, r.lat, r.lng, r.vel, r.chuva);
+
+            registrosValidos.push({ ...r, ts }); // guardar para análise de alertas
             i += 7;
         }
 
+        let insertedRegistros = [];
         if (values.length > 0) {
-            await db.query(
+            const result = await db.query(
                 `INSERT INTO registros (viagem_id, veiculo_id, timestamp, latitude, longitude, velocidade, chuva)
                  VALUES ${values.join(',')}
-                 ON CONFLICT DO NOTHING`,
+                 ON CONFLICT DO NOTHING
+                 RETURNING id, timestamp, latitude, longitude, velocidade`,
                 params
             );
+            insertedRegistros = result.rows;
         }
 
-        res.json({ sucesso: true, viagem_id: viagemId });
+        // ---- detectar alertas de velocidade ----
+        let alertaAtual = null;
+        const blocos = [];
+
+        for (let idx = 0; idx < registrosValidos.length; idx++) {
+            const r = registrosValidos[idx];
+            const limite = r.chuva ? r.lim_chuva : r.lim_seco;
+            const acimaLimite = r.vel > limite;
+
+            if (acimaLimite) {
+                if (!alertaAtual) alertaAtual = [];
+                alertaAtual.push(r);
+            } else {
+                if (alertaAtual) {
+                    blocos.push(alertaAtual);
+                    alertaAtual = null;
+                }
+            }
+        }
+        if (alertaAtual) blocos.push(alertaAtual);
+
+        // inserir blocos de alertas no banco
+        for (const bloco of blocos) {
+            const alertaRes = await db.query(
+                `INSERT INTO alertas (viagem_id, veiculo_id, timestamp, tipo, descricao)
+                 VALUES ($1,$2,$3,$4,$5)
+                 RETURNING id`,
+                [viagemId, dados.veiculo_id, bloco[0].ts, 'limite_velocidade', '']
+            );
+            const alertaId = alertaRes.rows[0].id;
+
+            // vincular registros_alertas
+            for (const r of bloco) {
+                const reg = insertedRegistros.find(ir =>
+                    ir.timestamp.toISOString() === new Date(r.ts).toISOString() &&
+                    Number(ir.latitude) === Number(r.lat) &&
+                    Number(ir.longitude) === Number(r.lng)
+                );
+                if (reg) {
+                    await db.query(
+                        `INSERT INTO registros_alertas (alerta_id, registro_id)
+                         VALUES ($1,$2)
+                         ON CONFLICT DO NOTHING`,
+                        [alertaId, reg.id]
+                    );
+                }
+            }
+        }
+
+        res.json({ sucesso: true, viagem_id: viagemId, alertas: blocos.length });
 
     } catch (err) {
         console.error('Erro ao registrar viagem:', err);
