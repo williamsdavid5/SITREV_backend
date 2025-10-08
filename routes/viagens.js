@@ -346,9 +346,12 @@ router.post('/registrar-viagem', async (req, res) => {
             insertedRegistros = result.rows;
         }
 
-        // ---- detectar alertas de velocidade ----
+        // ---- DETECÇÃO DE ALERTAS DE VELOCIDADE ----
+        console.log('=== DETECÇÃO DE ALERTAS DE VELOCIDADE ===');
+        console.log(`Registros válidos para análise: ${registrosValidos.length}`);
+
         let alertaAtual = null;
-        const blocos = [];
+        const blocosAlerta = [];
 
         for (let idx = 0; idx < registrosValidos.length; idx++) {
             const r = registrosValidos[idx];
@@ -356,46 +359,121 @@ router.post('/registrar-viagem', async (req, res) => {
             const acimaLimite = r.vel > limite;
 
             if (acimaLimite) {
-                if (!alertaAtual) alertaAtual = [];
-                alertaAtual.push(r);
+                // Inicia ou continua um bloco de alerta
+                if (!alertaAtual) {
+                    alertaAtual = {
+                        registros: [],
+                        inicio: r.timestamp,
+                        velocidadeMaxima: r.vel
+                    };
+                    console.log(`🚨 INICIANDO BLOCO - Registro ${idx}: ${r.vel}km/h > ${limite}km/h (${r.timestamp})`);
+                }
+                alertaAtual.registros.push({ ...r, index: idx });
+
+                // Atualiza velocidade máxima do bloco
+                if (r.vel > alertaAtual.velocidadeMaxima) {
+                    alertaAtual.velocidadeMaxima = r.vel;
+                }
+
             } else {
+                // Finaliza o bloco atual se existir
                 if (alertaAtual) {
-                    blocos.push(alertaAtual);
+                    console.log(`✅ FINALIZANDO BLOCO - ${alertaAtual.registros.length} registros, vel máxima: ${alertaAtual.velocidadeMaxima}km/h`);
+                    blocosAlerta.push(alertaAtual);
                     alertaAtual = null;
                 }
             }
         }
-        if (alertaAtual) blocos.push(alertaAtual);
 
-        // inserir blocos de alertas no banco
-        for (const bloco of blocos) {
-            const alertaRes = await db.query(
-                `INSERT INTO alertas (viagem_id, veiculo_id, timestamp, tipo, descricao)
-                 VALUES ($1,$2,$3,$4,$5)
-                 RETURNING id`,
-                [viagemId, dados.veiculo_id, bloco[0].ts, 'limite_velocidade', '']
-            );
-            const alertaId = alertaRes.rows[0].id;
-
-            // vincular registros_alertas
-            for (const r of bloco) {
-                const reg = insertedRegistros.find(ir =>
-                    ir.timestamp.toISOString() === new Date(r.ts).toISOString() &&
-                    Number(ir.latitude) === Number(r.lat) &&
-                    Number(ir.longitude) === Number(r.lng)
-                );
-                if (reg) {
-                    await db.query(
-                        `INSERT INTO registros_alertas (alerta_id, registro_id)
-                         VALUES ($1,$2)
-                         ON CONFLICT DO NOTHING`,
-                        [alertaId, reg.id]
-                    );
-                }
-            }
+        // Captura o último bloco se ainda estiver ativo
+        if (alertaAtual) {
+            console.log(`✅ FINALIZANDO ÚLTIMO BLOCO - ${alertaAtual.registros.length} registros, vel máxima: ${alertaAtual.velocidadeMaxima}km/h`);
+            blocosAlerta.push(alertaAtual);
         }
 
-        res.json({ sucesso: true, viagem_id: viagemId, alertas: blocos.length });
+        console.log(`📊 TOTAL DE BLOCOS DETECTADOS: ${blocosAlerta.length}`);
+
+        // INSERIR ALERTAS NO BANCO
+        let alertasCriados = 0;
+        let registrosVinculados = 0;
+
+        for (const [blocoIndex, bloco] of blocosAlerta.entries()) {
+            console.log(`\n📝 PROCESSANDO BLOCO ${blocoIndex + 1}:`);
+            console.log(`   📍 ${bloco.registros.length} registros consecutivos`);
+            console.log(`   🕒 Início: ${bloco.inicio}`);
+            console.log(`   🚗 Velocidade máxima: ${bloco.velocidadeMaxima}km/h`);
+            console.log(`   📍 Primeiro registro: ${bloco.registros[0].lat}, ${bloco.registros[0].lng}`);
+
+            // Criar alerta no banco
+            const alertaRes = await db.query(
+                `INSERT INTO alertas (viagem_id, veiculo_id, timestamp, tipo, descricao)
+                 VALUES ($1, $2, $3, $4, $5)
+                 RETURNING id`,
+                [
+                    viagemId,
+                    dados.veiculo_id,
+                    bloco.registros[0].ts, // timestamp do primeiro registro do bloco
+                    'limite_velocidade',
+                    `Excesso de velocidade por ${bloco.registros.length} registros consecutivos. Velocidade máxima: ${bloco.velocidadeMaxima}km/h`
+                ]
+            );
+
+            const alertaId = alertaRes.rows[0].id;
+            alertasCriados++;
+            console.log(`   ✅ Alerta ${alertaId} criado`);
+
+            // Vincular registros ao alerta
+            let vinculosEsteBloco = 0;
+            for (const registro of bloco.registros) {
+                // Encontrar o registro correspondente no banco
+                const registroEncontrado = insertedRegistros.find(ir =>
+                    Math.abs(new Date(ir.timestamp).getTime() - new Date(registro.ts).getTime()) < 5000 && // 5s tolerância
+                    Math.abs(ir.latitude - registro.lat) < 0.0001 &&
+                    Math.abs(ir.longitude - registro.lng) < 0.0001
+                );
+
+                if (registroEncontrado) {
+                    await db.query(
+                        `INSERT INTO registros_alertas (alerta_id, registro_id)
+                         VALUES ($1, $2)
+                         ON CONFLICT DO NOTHING`,
+                        [alertaId, registroEncontrado.id]
+                    );
+                    vinculosEsteBloco++;
+                    registrosVinculados++;
+                } else {
+                    console.log(`   ⚠️  Registro não encontrado para vincular: ${registro.timestamp}`);
+                }
+            }
+            console.log(`   🔗 ${vinculosEsteBloco}/${bloco.registros.length} registros vinculados ao alerta ${alertaId}`);
+        }
+
+        // LOG FINAL
+        console.log('\n=== RESUMO FINAL ===');
+        console.log(`📁 Viagem ID: ${viagemId}`);
+        console.log(`📊 Registros processados: ${registrosValidos.length}`);
+        console.log(`📊 Registros inseridos: ${insertedRegistros.length}`);
+        console.log(`🚨 Alertas criados: ${alertasCriados}`);
+        console.log(`🔗 Registros vinculados: ${registrosVinculados}`);
+        console.log(`📦 Blocos detectados: ${blocosAlerta.length}`);
+
+        // Log detalhado dos blocos para debug
+        blocosAlerta.forEach((bloco, index) => {
+            console.log(`   Bloco ${index + 1}: ${bloco.registros.length} registros, vel max: ${bloco.velocidadeMaxima}km/h`);
+        });
+
+        res.json({
+            sucesso: true,
+            viagem_id: viagemId,
+            alertas: alertasCriados,
+            detalhes: {
+                registros_processados: registrosValidos.length,
+                registros_inseridos: insertedRegistros.length,
+                blocos_detectados: blocosAlerta.length,
+                alertas_criados: alertasCriados,
+                registros_vinculados: registrosVinculados
+            }
+        });
 
     } catch (err) {
         console.error('Erro ao registrar viagem:', err);
