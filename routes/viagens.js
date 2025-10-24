@@ -363,8 +363,9 @@ router.post('/registrar-viagem', async (req, res) => {
                 if (!alertaAtual) {
                     alertaAtual = {
                         registros: [],
-                        inicio: r.timestamp,
-                        velocidadeMaxima: r.vel
+                        inicio: r.ts,
+                        velocidadeMaxima: r.vel,
+                        primeiroRegistro: r
                     };
                     console.log(`🚨 INICIANDO BLOCO - Registro ${idx}: ${r.vel}km/h > ${limite}km/h (${r.timestamp})`);
                 }
@@ -376,19 +377,25 @@ router.post('/registrar-viagem', async (req, res) => {
                 }
 
             } else {
-                // Finaliza o bloco atual se existir
-                if (alertaAtual) {
+                // Finaliza o bloco atual se existir E tiver pelo menos 2 registros
+                if (alertaAtual && alertaAtual.registros.length >= 2) {
                     console.log(`✅ FINALIZANDO BLOCO - ${alertaAtual.registros.length} registros, vel máxima: ${alertaAtual.velocidadeMaxima}km/h`);
                     blocosAlerta.push(alertaAtual);
-                    alertaAtual = null;
+                } else if (alertaAtual) {
+                    console.log(`⚠️  DESCARTANDO BLOCO - Apenas ${alertaAtual.registros.length} registro(s), mínimo não atingido`);
                 }
+                alertaAtual = null;
             }
         }
 
-        // Captura o último bloco se ainda estiver ativo
+        // Captura o último bloco se ainda estiver ativo E tiver pelo menos 2 registros
         if (alertaAtual) {
-            console.log(`✅ FINALIZANDO ÚLTIMO BLOCO - ${alertaAtual.registros.length} registros, vel máxima: ${alertaAtual.velocidadeMaxima}km/h`);
-            blocosAlerta.push(alertaAtual);
+            if (alertaAtual.registros.length >= 2) {
+                console.log(`✅ FINALIZANDO ÚLTIMO BLOCO - ${alertaAtual.registros.length} registros, vel máxima: ${alertaAtual.velocidadeMaxima}km/h`);
+                blocosAlerta.push(alertaAtual);
+            } else {
+                console.log(`⚠️  DESCARTANDO ÚLTIMO BLOCO - Apenas ${alertaAtual.registros.length} registro(s), mínimo não atingido`);
+            }
         }
 
         console.log(`📊 TOTAL DE BLOCOS DETECTADOS: ${blocosAlerta.length}`);
