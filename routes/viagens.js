@@ -346,9 +346,32 @@ router.post('/registrar-viagem', async (req, res) => {
             insertedRegistros = result.rows;
         }
 
+        const historicoRes = await db.query(
+            `SELECT timestamp, latitude AS lat, longitude AS lng, velocidade AS vel, chuva
+            FROM registros
+            WHERE viagem_id = $1
+            ORDER BY timestamp DESC
+            LIMIT 5`, // pega os últimos 5 registros, suficiente pra detectar continuidade
+            [viagemId]
+        );
+
+        const historico = historicoRes.rows.reverse(); // coloca em ordem cronológica
+
+        // Junta o histórico com os novos
+        const registrosComContexto = [...historico, ...registrosValidos];
+
+        // remove possíveis duplicatas (mesmo timestamp)
+        const mapa = new Map();
+        for (const r of registrosComContexto) mapa.set(r.ts, r);
+        const registrosAnalise = Array.from(mapa.values()).sort((a, b) => new Date(a.ts) - new Date(b.ts));
+
+        // substitui registrosValidos por registrosAnalise
+        console.log(`🧩 Incluídos ${historico.length} registros anteriores para contexto de análise`);
+
+
         // ---- DETECÇÃO DE ALERTAS DE VELOCIDADE ----
         console.log('=== DETECÇÃO DE ALERTAS DE VELOCIDADE ===');
-        console.log(`Registros válidos para análise: ${registrosValidos.length}`);
+        console.log(`Registros válidos para análise (com contexto): ${registrosAnalise.length}`);
 
         let alertaAtual = null;
         const blocosAlerta = [];
@@ -404,6 +427,7 @@ router.post('/registrar-viagem', async (req, res) => {
         let alertasCriados = 0;
         let registrosVinculados = 0;
 
+        // INSERIR ALERTAS NO BANCO (substituir a lógica de vinculação atual)
         for (const [blocoIndex, bloco] of blocosAlerta.entries()) {
             console.log(`\n📝 PROCESSANDO BLOCO ${blocoIndex + 1}:`);
             console.log(`   📍 ${bloco.registros.length} registros consecutivos`);
@@ -411,15 +435,29 @@ router.post('/registrar-viagem', async (req, res) => {
             console.log(`   🚗 Velocidade máxima: ${bloco.velocidadeMaxima}km/h`);
             console.log(`   📍 Primeiro registro: ${bloco.registros[0].lat}, ${bloco.registros[0].lng}`);
 
+            // Evitar criar alerta duplicado (mesma viagem, mesmo timestamp aproximado e mesmo tipo)
+            const alertaExistente = await db.query(
+                `SELECT id FROM alertas
+                WHERE viagem_id = $1 AND tipo = $2
+                AND timestamp BETWEEN ($3::timestamp - INTERVAL '5 seconds') AND ($3::timestamp + INTERVAL '5 seconds')
+                LIMIT 1`,
+                [viagemId, 'limite_velocidade', bloco.registros[0].ts]
+            );
+
+            if (alertaExistente.rows.length > 0) {
+                console.log(`   ⚠️ Alerta já existe (id ${alertaExistente.rows[0].id}) para este bloco, pulando criação.`);
+                continue;
+            }
+
             // Criar alerta no banco
             const alertaRes = await db.query(
                 `INSERT INTO alertas (viagem_id, veiculo_id, timestamp, tipo, descricao)
-                 VALUES ($1, $2, $3, $4, $5)
-                 RETURNING id`,
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id`,
                 [
                     viagemId,
                     dados.veiculo_id,
-                    bloco.registros[0].ts, // timestamp do primeiro registro do bloco
+                    bloco.registros[0].ts,
                     'limite_velocidade',
                     `Excesso de velocidade por ${bloco.registros.length} registros consecutivos. Velocidade máxima: ${bloco.velocidadeMaxima}km/h`
                 ]
@@ -429,31 +467,70 @@ router.post('/registrar-viagem', async (req, res) => {
             alertasCriados++;
             console.log(`   ✅ Alerta ${alertaId} criado`);
 
-            // Vincular registros ao alerta
+            // --- BUSCAR TODOS OS REGISTROS DO BANCO QUE PERTENCEM AO INTERVALO DO BLOCO ---
+            // Determinar janela de tempo do bloco (do primeiro ao último registro) com padding
+            const tsPrimeiro = bloco.registros[0].ts;
+            const tsUltimo = bloco.registros[bloco.registros.length - 1].ts;
+            // adicionar padding (5s) para cobrir pequenas diferenças de timestamp
+            const paddingSeconds = 5;
+
+            const registrosDbRes = await db.query(
+                `SELECT id, timestamp, latitude, longitude
+                FROM registros
+                WHERE viagem_id = $1
+                AND timestamp BETWEEN ($2::timestamp - INTERVAL '${paddingSeconds} seconds')
+                                AND ($3::timestamp + INTERVAL '${paddingSeconds} seconds')`,
+                [viagemId, tsPrimeiro, tsUltimo]
+            );
+
+
+            const registrosDb = registrosDbRes.rows;
+            console.log(`   🔍 Registros no DB no intervalo: ${registrosDb.length}`);
+
+            // Para cada registro do bloco, encontre o registro DB mais próximo (por tempo) e com lat/lng dentro de tolerância
+            const TOLERANCIA_LATLNG = 0.00015; // ~16m, ajuste se necessário
+
             let vinculosEsteBloco = 0;
             for (const registro of bloco.registros) {
-                // Encontrar o registro correspondente no banco
-                const registroEncontrado = insertedRegistros.find(ir =>
-                    Math.abs(new Date(ir.timestamp).getTime() - new Date(registro.ts).getTime()) < 5000 && // 5s tolerância
-                    Math.abs(ir.latitude - registro.lat) < 0.0001 &&
-                    Math.abs(ir.longitude - registro.lng) < 0.0001
-                );
+                // encontra candidato com menor diferença de timestamp (em ms)
+                let melhor = null;
+                let melhorDiff = Infinity;
+                const tsRegistro = new Date(registro.ts).getTime();
 
-                if (registroEncontrado) {
-                    await db.query(
-                        `INSERT INTO registros_alertas (alerta_id, registro_id)
-                         VALUES ($1, $2)
-                         ON CONFLICT DO NOTHING`,
-                        [alertaId, registroEncontrado.id]
-                    );
-                    vinculosEsteBloco++;
-                    registrosVinculados++;
+                for (const dbReg of registrosDb) {
+                    const dbTs = new Date(dbReg.timestamp).getTime();
+                    const diff = Math.abs(dbTs - tsRegistro);
+                    if (diff < melhorDiff) {
+                        // checa proximidade geográfica
+                        if (Math.abs(Number(dbReg.latitude) - Number(registro.lat)) <= TOLERANCIA_LATLNG &&
+                            Math.abs(Number(dbReg.longitude) - Number(registro.lng)) <= TOLERANCIA_LATLNG) {
+                            melhor = dbReg;
+                            melhorDiff = diff;
+                        }
+                    }
+                }
+
+                if (melhor) {
+                    try {
+                        await db.query(
+                            `INSERT INTO registros_alertas (alerta_id, registro_id)
+                        VALUES ($1, $2)
+                        ON CONFLICT DO NOTHING`,
+                            [alertaId, melhor.id]
+                        );
+                        vinculosEsteBloco++;
+                        registrosVinculados++;
+                    } catch (err) {
+                        console.log(`   ⚠️ Erro ao vincular registro ${melhor.id} ao alerta ${alertaId}:`, err.message);
+                    }
                 } else {
-                    console.log(`   ⚠️  Registro não encontrado para vincular: ${registro.timestamp}`);
+                    console.log(`   ⚠️ Nenhum registro DB encontrado para vincular ao timestamp ${registro.timestamp}`);
                 }
             }
+
             console.log(`   🔗 ${vinculosEsteBloco}/${bloco.registros.length} registros vinculados ao alerta ${alertaId}`);
         }
+
 
         // LOG FINAL
         console.log('\n=== RESUMO FINAL ===');
