@@ -327,24 +327,38 @@ router.post('/registrar-viagem', async (req, res) => {
             const ts = toBrasiliaOrNull(r.timestamp);
             if (!ts) continue;
 
-            values.push(`($${i}, $${i + 1}, $${i + 2}, $${i + 3}, $${i + 4}, $${i + 5}, $${i + 6})`);
-            params.push(viagemId, dados.veiculo_id, ts, r.lat, r.lng, r.vel, r.chuva);
+            // Decide qual limite será salvo
+            const limiteAplicado = r.chuva ? r.lim_chuva : r.lim_seco;
 
-            registrosValidos.push({ ...r, ts }); // guardar para análise de alertas
-            i += 7;
+            // adiciona +1 parâmetro no INSERT (agora 8 valores por linha)
+            values.push(`($${i}, $${i + 1}, $${i + 2}, $${i + 3}, $${i + 4}, $${i + 5}, $${i + 6}, $${i + 7})`);
+            params.push(
+                viagemId,             // $1
+                dados.veiculo_id,     // $2
+                ts,                   // $3
+                r.lat,                // $4
+                r.lng,                // $5
+                r.vel,                // $6
+                r.chuva,              // $7
+                limiteAplicado        // $8
+            );
+
+            registrosValidos.push({ ...r, ts, limite_aplicado: limiteAplicado }); // guardar para análise
+            i += 8;
         }
 
         let insertedRegistros = [];
         if (values.length > 0) {
             const result = await db.query(
-                `INSERT INTO registros (viagem_id, veiculo_id, timestamp, latitude, longitude, velocidade, chuva)
-                 VALUES ${values.join(',')}
-                 ON CONFLICT DO NOTHING
-                 RETURNING id, timestamp, latitude, longitude, velocidade`,
+                `INSERT INTO registros (viagem_id, veiculo_id, timestamp, latitude, longitude, velocidade, chuva, limite_aplicado)
+         VALUES ${values.join(',')}
+         ON CONFLICT DO NOTHING
+         RETURNING id, timestamp, latitude, longitude, velocidade, limite_aplicado`,
                 params
             );
             insertedRegistros = result.rows;
         }
+
 
         const historicoRes = await db.query(
             `SELECT timestamp, latitude AS lat, longitude AS lng, velocidade AS vel, chuva
