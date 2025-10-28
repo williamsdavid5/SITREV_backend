@@ -15,7 +15,7 @@ router.get('/registros', async (req, res) => {
               m.id AS motorista_id, m.nome AS motorista_nome, m.cartao_rfid,
 
               r.id AS registro_id, r.timestamp, r.latitude, r.longitude, 
-              r.velocidade, r.chuva
+              r.velocidade, r.chuva, r.limite_aplicado
 
             FROM veiculos v
             JOIN viagens vi ON vi.veiculo_id = v.id
@@ -73,7 +73,8 @@ router.get('/registros', async (req, res) => {
                     latitude: row.latitude,
                     longitude: row.longitude,
                     velocidade: row.velocidade,
-                    chuva: row.chuva
+                    chuva: row.chuva,
+                    limite_aplicado: row.limite_aplicado
                 });
             }
         });
@@ -85,5 +86,6 @@ router.get('/registros', async (req, res) => {
         res.status(500).json({ erro: 'Erro ao buscar os registros dos veículos' });
     }
 });
+
 
 export default router;
