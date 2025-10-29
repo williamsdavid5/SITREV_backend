@@ -209,22 +209,42 @@ router.get('/:id', async (req, res) => {
                 [alerta.id]
             );
 
+            // Buscar informações do veículo para o alerta
+            const { rows: veiculoRows } = await db.query(
+                'SELECT identificador, modelo FROM veiculos WHERE id = $1',
+                [alerta.veiculo_id]
+            );
+
             return {
                 ...alerta,
+                ...(veiculoRows[0] && {
+                    veiculo_identificador: veiculoRows[0].identificador,
+                    veiculo_modelo: veiculoRows[0].modelo
+                }),
                 registroCoordenadas: registros
             };
         }));
 
-
-        // Buscar registros para cada viagem
+        // Buscar registros e informações do veículo para cada viagem
         const viagensComRegistros = await Promise.all(
             viagens.map(async (viagem) => {
                 const { rows: registros } = await db.query(
                     'SELECT * FROM registros WHERE viagem_id = $1 ORDER BY timestamp ASC',
                     [viagem.id]
                 );
+
+                // Buscar informações do veículo para a viagem
+                const { rows: veiculoRows } = await db.query(
+                    'SELECT identificador, modelo FROM veiculos WHERE id = $1',
+                    [viagem.veiculo_id]
+                );
+
                 return {
                     ...viagem,
+                    ...(veiculoRows[0] && {
+                        veiculo_identificador: veiculoRows[0].identificador,
+                        veiculo_modelo: veiculoRows[0].modelo
+                    }),
                     registros
                 };
             })
