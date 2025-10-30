@@ -201,7 +201,7 @@ router.get('/:id', async (req, res) => {
 
         const alertas = await Promise.all(alertasBase.map(async (alerta) => {
             const { rows: registros } = await db.query(
-                `SELECT r.latitude, r.longitude, r.timestamp, r.velocidade
+                `SELECT r.latitude, r.longitude, r.timestamp, r.velocidade, r.limite_aplicado
          FROM registros_alertas ra
          JOIN registros r ON ra.registro_id = r.id
          WHERE ra.alerta_id = $1
