@@ -91,6 +91,7 @@ router.get('/limpo', async (req, res) => {
     try {
         const query = `
             SELECT 
+                v.id,
                 v.identificador,
                 v.modelo,
                 r.timestamp as ultima_leitura
@@ -108,7 +109,9 @@ router.get('/limpo', async (req, res) => {
 
         const result = await db.query(query);
 
+        // Formatar a resposta
         const registrosLimpos = result.rows.map(row => ({
+            id: row.id,
             identificador: row.identificador,
             modelo: row.modelo,
             ultima_leitura: row.ultima_leitura
@@ -121,5 +124,4 @@ router.get('/limpo', async (req, res) => {
         res.status(500).json({ erro: 'Erro ao buscar os registros limpos dos veículos' });
     }
 });
-
 export default router;
