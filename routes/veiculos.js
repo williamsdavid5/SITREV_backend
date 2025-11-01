@@ -163,6 +163,7 @@ router.get('/:id', async (req, res) => {
                 a.timestamp AS alerta_timestamp,
                 a.tipo AS alerta_tipo,
                 a.descricao AS alerta_descricao,
+                a.viagem_id AS alerta_viagem_id,  -- ADICIONADO: ID da viagem relacionada ao alerta
                 
                 ra.registro_id AS alerta_registro_id
 
@@ -249,6 +250,7 @@ router.get('/:id', async (req, res) => {
                         timestamp: row.alerta_timestamp,
                         tipo: row.alerta_tipo,
                         descricao: row.alerta_descricao,
+                        viagem_id: row.alerta_viagem_id,  // ADICIONADO: ID da viagem relacionada
                         motorista: {
                             id: row.motorista_id,
                             nome: row.motorista_nome,
