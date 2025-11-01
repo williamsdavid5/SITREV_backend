@@ -87,5 +87,39 @@ router.get('/registros', async (req, res) => {
     }
 });
 
+router.get('/limpo', async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                v.identificador,
+                v.modelo,
+                r.timestamp as ultima_leitura
+            FROM veiculos v
+            LEFT JOIN viagens vi ON vi.veiculo_id = v.id
+            LEFT JOIN registros r ON r.viagem_id = vi.id
+            WHERE r.timestamp = (
+                SELECT MAX(r2.timestamp)
+                FROM registros r2
+                JOIN viagens vi2 ON vi2.id = r2.viagem_id
+                WHERE vi2.veiculo_id = v.id
+            )
+            ORDER BY v.identificador
+        `;
+
+        const result = await db.query(query);
+
+        const registrosLimpos = result.rows.map(row => ({
+            identificador: row.identificador,
+            modelo: row.modelo,
+            ultima_leitura: row.ultima_leitura
+        }));
+
+        res.json(registrosLimpos);
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ erro: 'Erro ao buscar os registros limpos dos veículos' });
+    }
+});
 
 export default router;
