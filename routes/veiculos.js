@@ -124,4 +124,178 @@ router.get('/limpo', async (req, res) => {
         res.status(500).json({ erro: 'Erro ao buscar os registros limpos dos veículos' });
     }
 });
+
+router.get('/:id', async (req, res) => {
+    try {
+        const veiculoId = req.params.id;
+
+        // Query principal para buscar o veículo e suas viagens
+        const query = `
+            SELECT 
+                v.id AS veiculo_id,
+                v.identificador AS veiculo_identificador,
+                v.modelo AS veiculo_modelo,
+                v.status AS veiculo_status,
+                
+                vi.id AS viagem_id,
+                vi.inicio AS viagem_inicio,
+                vi.fim AS viagem_fim,
+                vi.origem_lat,
+                vi.origem_lng,
+                vi.destino_lat,
+                vi.destino_lng,
+                vi.chuva_detectada,
+                vi.id_referencia,
+                
+                m.id AS motorista_id,
+                m.nome AS motorista_nome,
+                m.cartao_rfid AS motorista_rfid,
+                
+                r.id AS registro_id,
+                r.timestamp AS registro_timestamp,
+                r.latitude AS registro_latitude,
+                r.longitude AS registro_longitude,
+                r.velocidade AS registro_velocidade,
+                r.chuva AS registro_chuva,
+                r.limite_aplicado AS registro_limite,
+                
+                a.id AS alerta_id,
+                a.timestamp AS alerta_timestamp,
+                a.tipo AS alerta_tipo,
+                a.descricao AS alerta_descricao,
+                
+                ra.registro_id AS alerta_registro_id
+
+            FROM veiculos v
+            LEFT JOIN viagens vi ON vi.veiculo_id = v.id
+            LEFT JOIN motoristas m ON m.id = vi.motorista_id
+            LEFT JOIN registros r ON r.viagem_id = vi.id
+            LEFT JOIN alertas a ON a.viagem_id = vi.id
+            LEFT JOIN registros_alertas ra ON ra.alerta_id = a.id AND ra.registro_id = r.id
+            
+            WHERE v.id = $1
+            ORDER BY vi.inicio DESC, r.timestamp ASC, a.timestamp DESC
+        `;
+
+        const result = await db.query(query, [veiculoId]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ erro: 'Veículo não encontrado' });
+        }
+
+        // Estrutura base do veículo
+        const veiculo = {
+            id: result.rows[0].veiculo_id,
+            identificador: result.rows[0].veiculo_identificador,
+            modelo: result.rows[0].veiculo_modelo,
+            status: result.rows[0].veiculo_status,
+            viagens: []
+        };
+
+        // Mapa para agrupar viagens
+        const viagensMap = new Map();
+        // Mapa para agrupar alertas por viagem
+        const alertasMap = new Map();
+
+        result.rows.forEach(row => {
+            // Processar viagens
+            if (row.viagem_id && !viagensMap.has(row.viagem_id)) {
+                viagensMap.set(row.viagem_id, {
+                    id: row.viagem_id,
+                    inicio: row.viagem_inicio,
+                    fim: row.viagem_fim,
+                    origem_lat: row.origem_lat,
+                    origem_lng: row.origem_lng,
+                    destino_lat: row.destino_lat,
+                    destino_lng: row.destino_lng,
+                    chuva_detectada: row.chuva_detectada,
+                    id_referencia: row.id_referencia,
+                    motorista: {
+                        id: row.motorista_id,
+                        nome: row.motorista_nome,
+                        cartao_rfid: row.motorista_rfid
+                    },
+                    registros: [],
+                    alertas: []
+                });
+            }
+
+            // Processar registros
+            if (row.registro_id) {
+                const viagem = viagensMap.get(row.viagem_id);
+                const registro = {
+                    id: row.registro_id,
+                    timestamp: row.registro_timestamp,
+                    latitude: row.registro_latitude,
+                    longitude: row.registro_longitude,
+                    velocidade: row.registro_velocidade,
+                    chuva: row.registro_chuva,
+                    limite_aplicado: row.registro_limite
+                };
+
+                // Verificar se o registro já foi adicionado
+                if (!viagem.registros.some(r => r.id === registro.id)) {
+                    viagem.registros.push(registro);
+                }
+            }
+
+            // Processar alertas
+            if (row.alerta_id) {
+                const key = `${row.viagem_id}-${row.alerta_id}`;
+
+                if (!alertasMap.has(key)) {
+                    alertasMap.set(key, {
+                        id: row.alerta_id,
+                        timestamp: row.alerta_timestamp,
+                        tipo: row.alerta_tipo,
+                        descricao: row.alerta_descricao,
+                        motorista: {
+                            id: row.motorista_id,
+                            nome: row.motorista_nome,
+                            cartao_rfid: row.motorista_rfid
+                        },
+                        registros: []
+                    });
+                }
+
+                // Adicionar registro ao alerta se estiver associado
+                if (row.alerta_registro_id && row.registro_id) {
+                    const alerta = alertasMap.get(key);
+                    const registroAlerta = {
+                        id: row.registro_id,
+                        timestamp: row.registro_timestamp,
+                        latitude: row.registro_latitude,
+                        longitude: row.registro_longitude,
+                        velocidade: row.registro_velocidade,
+                        chuva: row.registro_chuva,
+                        limite_aplicado: row.registro_limite
+                    };
+
+                    if (!alerta.registros.some(r => r.id === registroAlerta.id)) {
+                        alerta.registros.push(registroAlerta);
+                    }
+                }
+            }
+        });
+
+        // Adicionar alertas às viagens correspondentes
+        alertasMap.forEach((alerta, key) => {
+            const [viagemId] = key.split('-');
+            const viagem = viagensMap.get(parseInt(viagemId));
+            if (viagem) {
+                viagem.alertas.push(alerta);
+            }
+        });
+
+        // Adicionar viagens ao veículo
+        veiculo.viagens = Array.from(viagensMap.values());
+
+        res.json(veiculo);
+
+    } catch (err) {
+        console.error('Erro ao buscar veículo:', err);
+        res.status(500).json({ erro: 'Erro interno do servidor' });
+    }
+});
+
 export default router;
