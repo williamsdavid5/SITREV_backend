@@ -94,10 +94,13 @@ router.get('/limpo', async (req, res) => {
                 v.id,
                 v.identificador,
                 v.modelo,
-                r.timestamp as ultima_leitura
+                r.timestamp as ultima_leitura,
+                m.id as motorista_id,
+                m.nome as motorista_nome
             FROM veiculos v
             LEFT JOIN viagens vi ON vi.veiculo_id = v.id
             LEFT JOIN registros r ON r.viagem_id = vi.id
+            LEFT JOIN motoristas m ON m.id = vi.motorista_id
             WHERE r.timestamp = (
                 SELECT MAX(r2.timestamp)
                 FROM registros r2
@@ -114,7 +117,11 @@ router.get('/limpo', async (req, res) => {
             id: row.id,
             identificador: row.identificador,
             modelo: row.modelo,
-            ultima_leitura: row.ultima_leitura
+            ultima_leitura: row.ultima_leitura,
+            motorista: row.motorista_id ? {
+                id: row.motorista_id,
+                nome: row.motorista_nome
+            } : null
         }));
 
         res.json(registrosLimpos);
