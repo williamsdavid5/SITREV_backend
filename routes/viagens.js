@@ -14,11 +14,13 @@ router.get('/limpo', async (_, res) => {
                 m.nome AS nome_motorista,
                 ve.identificador AS identificador_veiculo,
                 ve.modelo AS modelo_veiculo,
-                COUNT(a.id) AS quantidade_alertas
+                COUNT(a.id) AS quantidade_alertas,
+                MAX(r.timestamp) AS ultimo_registro -- ADICIONADO: data/hora do último registro
             FROM viagens v
             JOIN motoristas m ON v.motorista_id = m.id
             JOIN veiculos ve ON v.veiculo_id = ve.id
             LEFT JOIN alertas a ON a.viagem_id = v.id
+            LEFT JOIN registros r ON r.viagem_id = v.id -- ADICIONADO: join com registros
             GROUP BY v.id, v.inicio, m.nome, ve.identificador, ve.modelo
             ORDER BY v.inicio DESC
         `;
