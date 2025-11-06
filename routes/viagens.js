@@ -67,6 +67,45 @@ router.get('/limpo', async (req, res) => {
     }
 });
 
+// para a lógica de pesquisa
+router.get('/buscar', async (req, res) => {
+    try {
+        const termo = req.query.q?.trim() || '';
+        if (!termo) {
+            return res.status(400).json({ erro: 'Informe um termo de busca' });
+        }
+
+        const query = `
+            SELECT 
+                v.id,
+                v.inicio AS data_viagem,
+                m.nome AS nome_motorista,
+                ve.identificador AS identificador_veiculo,
+                ve.modelo AS modelo_veiculo,
+                COUNT(a.id) AS quantidade_alertas,
+                MAX(r.timestamp) AS ultimo_registro
+            FROM viagens v
+            JOIN motoristas m ON v.motorista_id = m.id
+            JOIN veiculos ve ON v.veiculo_id = ve.id
+            LEFT JOIN alertas a ON a.viagem_id = v.id
+            LEFT JOIN registros r ON r.viagem_id = v.id
+            WHERE 
+                LOWER(m.nome) LIKE LOWER($1)
+                OR LOWER(ve.identificador) LIKE LOWER($1)
+                OR LOWER(ve.modelo) LIKE LOWER($1)
+            GROUP BY v.id, v.inicio, m.nome, ve.identificador, ve.modelo
+            ORDER BY v.inicio DESC
+            LIMIT 50
+        `;
+
+        const { rows } = await db.query(query, [`%${termo}%`]);
+        res.status(200).json(rows);
+    } catch (err) {
+        console.error('Erro ao buscar viagens:', err);
+        res.status(500).json({ erro: 'Erro ao buscar viagens' });
+    }
+});
+
 
 
 // Criar viagem
