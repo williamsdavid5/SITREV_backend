@@ -68,12 +68,36 @@ router.get('/limpo', async (req, res) => {
 });
 
 // para a lógica de pesquisa
+// /api/viagens/buscar
 router.get('/buscar', async (req, res) => {
     try {
-        const termo = req.query.q?.trim() || '';
-        if (!termo) {
-            return res.status(400).json({ erro: 'Informe um termo de busca' });
+        const termo = req.query.q?.trim().toLowerCase() || '';
+        const dataInicio = req.query.dataInicio;
+        const dataFim = req.query.dataFim;
+
+        let filtros = [];
+        let valores = [];
+        let contador = 1;
+
+        // 🔹 Filtro por texto
+        if (termo) {
+            filtros.push(`(
+                LOWER(m.nome) LIKE LOWER($${contador})
+                OR LOWER(ve.identificador) LIKE LOWER($${contador})
+                OR LOWER(ve.modelo) LIKE LOWER($${contador})
+            )`);
+            valores.push(`%${termo}%`);
+            contador++;
         }
+
+        // 🔹 Filtro por intervalo de datas (ISO)
+        if (dataInicio && dataFim) {
+            filtros.push(`v.inicio::date BETWEEN $${contador} AND $${contador + 1}`);
+            valores.push(dataInicio, dataFim);
+            contador += 2;
+        }
+
+        const where = filtros.length > 0 ? `WHERE ${filtros.join(' AND ')}` : '';
 
         const query = `
             SELECT 
@@ -89,22 +113,20 @@ router.get('/buscar', async (req, res) => {
             JOIN veiculos ve ON v.veiculo_id = ve.id
             LEFT JOIN alertas a ON a.viagem_id = v.id
             LEFT JOIN registros r ON r.viagem_id = v.id
-            WHERE 
-                LOWER(m.nome) LIKE LOWER($1)
-                OR LOWER(ve.identificador) LIKE LOWER($1)
-                OR LOWER(ve.modelo) LIKE LOWER($1)
+            ${where}
             GROUP BY v.id, v.inicio, m.nome, ve.identificador, ve.modelo
             ORDER BY v.inicio DESC
-            LIMIT 50
+            LIMIT 100;
         `;
 
-        const { rows } = await db.query(query, [`%${termo}%`]);
+        const { rows } = await db.query(query, valores);
         res.status(200).json(rows);
     } catch (err) {
         console.error('Erro ao buscar viagens:', err);
         res.status(500).json({ erro: 'Erro ao buscar viagens' });
     }
 });
+
 
 
 
