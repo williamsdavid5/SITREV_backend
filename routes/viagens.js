@@ -42,22 +42,23 @@ router.get('/limpo', async (req, res) => {
         const offset = (page - 1) * limit;
 
         const query = `
-            SELECT 
-                v.id,
-                v.inicio AS data_viagem, 
-                m.nome AS nome_motorista,
-                ve.identificador AS identificador_veiculo,
-                ve.modelo AS modelo_veiculo,
-                COUNT(a.id) AS quantidade_alertas,
-                MAX(r.timestamp) AS ultimo_registro
-            FROM viagens v
-            JOIN motoristas m ON v.motorista_id = m.id
-            JOIN veiculos ve ON v.veiculo_id = ve.id
-            LEFT JOIN alertas a ON a.viagem_id = v.id
-            LEFT JOIN registros r ON r.viagem_id = v.id
-            GROUP BY v.id, v.inicio, m.nome, ve.identificador, ve.modelo
-            ORDER BY v.inicio DESC
-            LIMIT $1 OFFSET $2
+SELECT DISTINCT ON (v.id)
+    v.id,
+    v.inicio AS data_viagem,
+    m.nome AS nome_motorista,
+    ve.identificador AS identificador_veiculo,
+    ve.modelo AS modelo_veiculo,
+    COUNT(a.id) AS quantidade_alertas,
+    MAX(r.timestamp) AS ultimo_registro
+FROM viagens v
+JOIN motoristas m ON v.motorista_id = m.id
+JOIN veiculos ve ON v.veiculo_id = ve.id
+LEFT JOIN alertas a ON a.viagem_id = v.id
+LEFT JOIN registros r ON r.viagem_id = v.id
+GROUP BY v.id, v.inicio, m.nome, ve.identificador, ve.modelo
+ORDER BY v.inicio DESC
+LIMIT $1 OFFSET $2;
+
         `;
 
         const { rows } = await db.query(query, [limit, offset]);
