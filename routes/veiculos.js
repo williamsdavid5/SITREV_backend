@@ -419,8 +419,9 @@ router.get('/relatorio/:id', async (req, res) => {
             .replace('{{ULTIMO_MOTORISTA}}', veiculo.ultimo_motorista || '—')
             .replace('{{LISTA_VIAGENS}}', viagensHTML || '<p>Nenhuma viagem registrada</p>');
 
-        // 🔹 Gera o PDF
 
+        await new Promise(r => setTimeout(r, 400));
+        // 🔹 Gera o PDF
         // 🧠 Detecta se está rodando no Render (Linux) ou local
         const isRender = process.env.RENDER === 'true' || process.env.NODE_ENV === 'production';
 
