@@ -6,8 +6,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node index.js",
-    "dev": "nodemon index.js",
-    "postinstall": "npx puppeteer browsers install chrome"
+    "dev": "nodemon index.js"
   },
   "keywords": [],
   "author": "",
@@ -20,7 +19,7 @@
     "luxon": "^3.7.1",
     "pdfkit": "^0.17.2",
     "pg": "^8.16.0",
-    "puppeteer": "^24.29.1",
+    "puppeteer": "^22.7.1",
     "telemetria-backend": "file:"
   },
   "devDependencies": {

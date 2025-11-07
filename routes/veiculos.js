@@ -420,9 +420,37 @@ router.get('/relatorio/:id', async (req, res) => {
             .replace('{{LISTA_VIAGENS}}', viagensHTML || '<p>Nenhuma viagem registrada</p>');
 
         // 🔹 Gera o PDF
-        const browser = await puppeteer.launch();
+
+        // 🧠 Detecta se está rodando no Render (Linux) ou local
+        const isRender = process.env.RENDER === 'true' || process.env.NODE_ENV === 'production';
+
+        const launchOptions = isRender
+            ? {
+                headless: true,
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
+                    '--no-zygote',
+                    '--single-process',
+                ],
+            }
+            : {
+                headless: 'new', // modo estável no Windows
+            };
+
+        const browser = await puppeteer.launch(launchOptions);
+
+
         const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'networkidle0' });
+
+        const tempFilePath = path.resolve('./temp_relatorio.html');
+        fs.writeFileSync(tempFilePath, html, 'utf8');
+
+        await page.goto('file://' + tempFilePath, { waitUntil: ['load', 'networkidle0'] });
+        await page.emulateMediaType('screen');
+
 
         const pdfBuffer = await page.pdf({
             format: 'A4',
@@ -431,11 +459,14 @@ router.get('/relatorio/:id', async (req, res) => {
         });
 
         await browser.close();
+        fs.unlinkSync(tempFilePath);
 
         // 🔹 Retorna o PDF
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="relatorio_veiculo_${veiculo.identificador}.pdf"`);
         res.send(pdfBuffer);
+
+
 
     } catch (erro) {
         console.error('Erro ao gerar relatório:', erro);
