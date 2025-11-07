@@ -319,7 +319,6 @@ router.get('/:id', async (req, res) => {
 
 
 
-
 router.get('/relatorio/:id', async (req, res) => {
     const { id } = req.params;
 
@@ -429,7 +428,9 @@ router.get('/relatorio/:id', async (req, res) => {
             .replace('{{ULTIMO_MOTORISTA}}', veiculo.ultimo_motorista || '—')
             .replace('{{LISTA_VIAGENS}}', viagensHTML || '<p>Nenhuma viagem registrada</p>');
 
-        // 🔹 Configuração SIMPLIFICADA para Puppeteer
+        // 🔹 Configuração para diferentes ambientes
+        const isRender = process.env.RENDER === 'true';
+
         const launchOptions = {
             headless: true,
             args: [
@@ -443,7 +444,25 @@ router.get('/relatorio/:id', async (req, res) => {
             timeout: 30000
         };
 
+        // 🔹 Configuração específica para o Render
+        if (isRender) {
+            // No Render, use o Chromium do sistema
+            launchOptions.executablePath = '/usr/bin/chromium-browser';
+            // Adicionar args específicos para o Render
+            launchOptions.args.push(
+                '--single-process',
+                '--no-zygote',
+                '--disable-software-rasterizer',
+                '--disable-background-timer-throttling'
+            );
+        }
+
         console.log('Iniciando Puppeteer...');
+        console.log('Ambiente:', isRender ? 'Render' : 'Local');
+        if (isRender) {
+            console.log('Usando Chromium do sistema no Render');
+        }
+
         browser = await puppeteer.launch(launchOptions);
 
         const page = await browser.newPage();
@@ -454,23 +473,23 @@ router.get('/relatorio/:id', async (req, res) => {
 
         console.log('Configurando conteúdo da página...');
 
-        // Usar arquivo temporário em vez de setContent (mais estável)
+        // Usar arquivo temporário
         const tempFilePath = path.join(__dirname, 'temp_relatorio_' + Date.now() + '.html');
         fs.writeFileSync(tempFilePath, html, 'utf8');
 
         try {
             console.log('Carregando arquivo temporário...');
             await page.goto(`file://${tempFilePath}`, {
-                waitUntil: 'load', // Usar 'load' em vez de 'domcontentloaded'
+                waitUntil: 'load',
                 timeout: 15000
             });
 
-            // Aguardar um pouco para garantir que tudo carregou - USANDO setTimeout NATIVO
+            // Aguardar um pouco para garantir que tudo carregou
             await new Promise(resolve => setTimeout(resolve, 2000));
 
             console.log('Gerando PDF...');
 
-            // Gerar PDF com configuração mínima
+            // Gerar PDF
             const pdfBuffer = await page.pdf({
                 format: 'A4',
                 printBackground: true,
