@@ -1,9 +1,14 @@
 import express from 'express';
+import db from '../db.js';
+
+import puppeteer from 'puppeteer';
 import path from 'path';
 import fs from 'fs';
-import puppeteer from 'puppeteer';
-import db from '../db.js';
-// import sitrevLogo from '../assets/img/SITREV_LOGO.jpg'
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 
 const router = express.Router();
 
@@ -311,9 +316,14 @@ router.get('/:id', async (req, res) => {
     }
 });
 
+
+
+
+
 router.get('/relatorio/:id', async (req, res) => {
     const { id } = req.params;
 
+    let browser;
     try {
         // 🔹 Consulta o veículo
         const veiculoQuery = `
@@ -419,65 +429,95 @@ router.get('/relatorio/:id', async (req, res) => {
             .replace('{{ULTIMO_MOTORISTA}}', veiculo.ultimo_motorista || '—')
             .replace('{{LISTA_VIAGENS}}', viagensHTML || '<p>Nenhuma viagem registrada</p>');
 
+        // 🔹 Configuração SIMPLIFICADA para Puppeteer
+        const launchOptions = {
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor'
+            ],
+            timeout: 30000
+        };
 
-        await new Promise(r => setTimeout(r, 400));
-        // 🔹 Gera o PDF
-        // 🧠 Detecta se está rodando no Render (Linux) ou local
-        const isRender = process.env.RENDER === 'true' || process.env.NODE_ENV === 'production';
-
-        const launchOptions = isRender
-            ? {
-                headless: true,
-                args: [
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--no-zygote',
-                    '--single-process',
-                ],
-            }
-            : {
-                headless: 'new', // modo estável no Windows
-            };
-
-        const browser = await puppeteer.launch(launchOptions);
-
+        console.log('Iniciando Puppeteer...');
+        browser = await puppeteer.launch(launchOptions);
 
         const page = await browser.newPage();
 
-        const tempFilePath = path.resolve('./temp_relatorio.html');
+        // Configurar timeouts
+        page.setDefaultNavigationTimeout(30000);
+        page.setDefaultTimeout(30000);
+
+        console.log('Configurando conteúdo da página...');
+
+        // Usar arquivo temporário em vez de setContent (mais estável)
+        const tempFilePath = path.join(__dirname, 'temp_relatorio_' + Date.now() + '.html');
         fs.writeFileSync(tempFilePath, html, 'utf8');
 
-        await page.goto('file://' + tempFilePath, { waitUntil: ['load', 'networkidle0'] });
-        await page.emulateMediaType('screen');
+        try {
+            console.log('Carregando arquivo temporário...');
+            await page.goto(`file://${tempFilePath}`, {
+                waitUntil: 'load', // Usar 'load' em vez de 'domcontentloaded'
+                timeout: 15000
+            });
 
+            // Aguardar um pouco para garantir que tudo carregou - USANDO setTimeout NATIVO
+            await new Promise(resolve => setTimeout(resolve, 2000));
 
-        const pdfBuffer = await page.pdf({
-            format: 'A4',
-            printBackground: true,
-            margin: { top: '20mm', right: '20mm', bottom: '20mm', left: '20mm' }
-        });
+            console.log('Gerando PDF...');
 
-        await browser.close();
-        fs.unlinkSync(tempFilePath);
+            // Gerar PDF com configuração mínima
+            const pdfBuffer = await page.pdf({
+                format: 'A4',
+                printBackground: true,
+                margin: { top: '20mm', right: '20mm', bottom: '20mm', left: '20mm' }
+            });
 
-        // 🔹 Retorna o PDF
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename="relatorio_veiculo_${veiculo.identificador}.pdf"`);
-        res.send(pdfBuffer);
+            console.log('PDF gerado com sucesso!');
 
+            // 🔹 Retorna o PDF
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="relatorio_veiculo_${veiculo.identificador}.pdf"`);
+            res.send(pdfBuffer);
 
+        } finally {
+            // Limpeza do arquivo temporário
+            if (fs.existsSync(tempFilePath)) {
+                fs.unlinkSync(tempFilePath);
+            }
+        }
 
     } catch (erro) {
         console.error('Erro ao gerar relatório:', erro);
-        res.status(500).json({ erro: 'Erro ao gerar relatório' });
+
+        // Fechar o browser de forma segura
+        if (browser) {
+            try {
+                await browser.close();
+            } catch (closeError) {
+                console.error('Erro ao fechar browser:', closeError);
+            }
+        }
+
+        res.status(500).json({
+            erro: 'Erro ao gerar relatório',
+            detalhes: process.env.NODE_ENV === 'development' ? erro.message : 'Erro interno do servidor'
+        });
+    } finally {
+        // Garantir que o browser seja fechado
+        if (browser) {
+            try {
+                await browser.close();
+            } catch (closeError) {
+                console.error('Erro ao fechar browser no finally:', closeError);
+            }
+        }
     }
 });
-
-
-
-
 
 
 
