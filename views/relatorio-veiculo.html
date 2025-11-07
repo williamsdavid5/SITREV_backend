@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Relatório de Veículo</title>
+    <style>
+        /* @page {
+            size: A4;
+            margin: 20mm;
+        } */
+
+        body {
+            font-family: "Arial", sans-serif;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            font-size: 12pt;
+            line-height: 1.4;
+        }
+
+        header {
+            text-align: center;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #004222;
+        }
+
+        header img {
+            width: 120px;
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            color: #004222;
+            font-size: 22pt;
+            margin: 0 0 10px 0;
+        }
+
+        section {
+            margin-bottom: 25px;
+            page-break-inside: avoid;
+        }
+
+        h2 {
+            font-size: 12pt;
+            margin: 0;
+            font-weight: bold;
+        }
+
+        .destaqueTitulo {
+            background-color: #004222;
+            color: white;
+            padding: 8px 12px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+        }
+
+        .info {
+            margin-top: 10px;
+            padding: 0 10px;
+        }
+
+        .info p {
+            margin: 0;
+            padding: 0;
+        }
+
+        .tabela {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+
+        .tabela th,
+        .tabela td {
+            border: 1px solid #ccc;
+            padding: 6px 8px;
+            font-size: 10pt;
+        }
+
+        .tabela th {
+            background-color: #f2f2f2;
+            text-align: left;
+        }
+
+        .viagem {
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 15px;
+            margin-bottom: 20px;
+            background: #fafafa;
+            page-break-inside: avoid;
+        }
+
+        .viagem p {
+            margin: 0;
+        }
+
+        .alerta {
+            margin-left: 15px;
+            padding: 8px 12px;
+            border-left: 3px solid #004222;
+            margin-top: 10px;
+            margin-bottom: 10px;
+            background: #fff;
+            border-radius: 0 4px 4px 0;
+        }
+
+        .alerta p {
+            margin: 4px 0;
+        }
+
+        .alertas {
+            margin-top: 12px;
+            padding-top: 8px;
+            border-top: 1px dashed #ccc;
+        }
+
+        a {
+            color: #0077cc;
+            text-decoration: none;
+        }
+
+        a[target="_blank"]::after {
+            content: " 🔗";
+            font-size: 0.8em;
+        }
+
+        footer {
+            position: fixed;
+            bottom: 10mm;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 10pt;
+            color: #666;
+        }
+
+        .sem-dados {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+
+        .separador-viagem {
+            height: 1px;
+            background: #ddd;
+            margin: 15px 0;
+        }
+
+        /* Melhorias para impressão em PDF */
+        @media print {
+            .viagem {
+                page-break-inside: avoid;
+            }
+
+            .alerta {
+                page-break-inside: avoid;
+            }
+
+            a[target="_blank"]::after {
+                content: "";
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <img src="../assets/img/SITREV_LOGO" alt="Logo da Empresa" />
+        <h1>Relatório de Telemetria</h1>
+        <p>Emitido em: <strong>{{DATA_EMISSAO}}</strong></p>
+    </header>
+
+    <!-- 🔹 Informações do veículo -->
+
+    <div class="destaqueTitulo">
+        <h2>Informações do Veículo</h2>
+    </div>
+
+    <div class="info">
+        <p><strong>ID:</strong> {{ID}}</p>
+        <p><strong>Identificador:</strong> {{IDENTIFICADOR}}</p>
+        <p><strong>Modelo:</strong> {{MODELO}}</p>
+        <p><strong>Status:</strong> {{STATUS}}</p>
+        <p><strong>Total de viagens:</strong> {{TOTAL_VIAGENS}}</p>
+        <p><strong>Total de alertas:</strong> {{TOTAL_ALERTAS}}</p>
+        <p><strong>Último registro:</strong> {{ULTIMO_REGISTRO}}</p>
+        <p><strong>Último motorista:</strong> {{ULTIMO_MOTORISTA}}</p>
+    </div>
+
+
+    <!-- 🔹 Viagens -->
+
+    <div class="destaqueTitulo">
+        <h2>Viagens Registradas</h2>
+    </div>
+
+    <div id="lista-viagens">
+        {{LISTA_VIAGENS}}
+    </div>
+
+
+    <!-- <footer>
+        SITREV © 2025 - Relatório gerado em {{DATA_EMISSAO}}
+    </footer> -->
+</body>
+
+</html>

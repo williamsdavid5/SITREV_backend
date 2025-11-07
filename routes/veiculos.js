@@ -1,5 +1,9 @@
 import express from 'express';
+import path from 'path';
+import fs from 'fs';
+import puppeteer from 'puppeteer';
 import db from '../db.js';
+// import sitrevLogo from '../assets/img/SITREV_LOGO.jpg'
 
 const router = express.Router();
 
@@ -306,5 +310,145 @@ router.get('/:id', async (req, res) => {
         res.status(500).json({ erro: 'Erro interno do servidor' });
     }
 });
+
+router.get('/relatorio/:id', async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        // 🔹 Consulta o veículo
+        const veiculoQuery = `
+            SELECT 
+                v.id, v.identificador, v.modelo, v.status,
+                (SELECT COUNT(*) FROM viagens WHERE veiculo_id = v.id) AS total_viagens,
+                (SELECT COUNT(*) FROM alertas WHERE veiculo_id = v.id) AS total_alertas,
+                (SELECT MAX(r.timestamp) FROM registros r WHERE r.veiculo_id = v.id) AS ultimo_registro,
+                (SELECT m.nome FROM motoristas m
+                    JOIN viagens vi ON vi.motorista_id = m.id
+                    WHERE vi.veiculo_id = v.id
+                    ORDER BY vi.inicio DESC
+                    LIMIT 1) AS ultimo_motorista
+            FROM veiculos v
+            WHERE v.id = $1
+        `;
+        const { rows: veiculos } = await db.query(veiculoQuery, [id]);
+        if (!veiculos.length) return res.status(404).json({ erro: 'Veículo não encontrado' });
+        const veiculo = veiculos[0];
+
+        // 🔹 Consulta viagens
+        const viagensQuery = `
+            SELECT 
+                vi.id, vi.inicio, vi.fim, vi.chuva_detectada,
+                vi.origem_lat, vi.origem_lng, vi.destino_lat, vi.destino_lng,
+                m.nome AS motorista, m.cartao_rfid,
+                COALESCE((SELECT COUNT(*) FROM alertas a WHERE a.viagem_id = vi.id), 0) AS total_alertas
+            FROM viagens vi
+            LEFT JOIN motoristas m ON vi.motorista_id = m.id
+            WHERE vi.veiculo_id = $1
+            ORDER BY vi.inicio DESC
+        `;
+        const { rows: viagens } = await db.query(viagensQuery, [id]);
+
+        // 🔹 Consulta alertas
+        const alertasQuery = `
+            SELECT 
+                a.id, a.tipo, a.descricao, a.timestamp AS data,
+                a.viagem_id,
+                (SELECT COUNT(*) FROM registros_alertas ra WHERE ra.alerta_id = a.id) AS qtd_registros,
+                (SELECT r.latitude FROM registros r
+                 JOIN registros_alertas ra ON ra.registro_id = r.id
+                 WHERE ra.alerta_id = a.id LIMIT 1) AS latitude,
+                (SELECT r.longitude FROM registros r
+                 JOIN registros_alertas ra ON ra.registro_id = r.id
+                 WHERE ra.alerta_id = a.id LIMIT 1) AS longitude
+            FROM alertas a
+            WHERE a.veiculo_id = $1
+            ORDER BY a.timestamp DESC
+        `;
+        const { rows: alertas } = await db.query(alertasQuery, [id]);
+
+        // 🔹 Lê o HTML base
+        const templatePath = path.resolve('./views/relatorio-veiculo.html');
+        let html = fs.readFileSync(templatePath, 'utf8');
+
+        // 🔹 Monta blocos de viagens
+        const formatarData = (data) => data ? new Date(data).toLocaleString('pt-BR') : '—';
+
+        let viagensHTML = '';
+        for (const v of viagens) {
+            const alertasDaViagem = alertas.filter(a => a.viagem_id === v.id);
+
+            let alertasHTML = '';
+            for (const a of alertasDaViagem) {
+                alertasHTML += `
+                    <p><strong>- Alerta ${a.id}:</strong> ${a.tipo} (${formatarData(a.data)})</p>
+                    <p><strong>Descrição:</strong> ${a.descricao || '—'}</p>
+                    <p><strong>Local (maps):</strong> <a href="https://www.google.com/maps?q=${a.latitude},${a.longitude}" target="_blank">Ver no mapa</a></p>
+                    <p><strong>Registros associados:</strong> ${a.qtd_registros}</p>
+                `;
+            }
+
+            viagensHTML += `
+                <div class="viagem">
+                    <p><strong>Viagem ${v.id}</strong></p>
+                    <p><strong>Início:</strong> ${formatarData(v.inicio)}</p>
+                    <p><strong>Fim:</strong> ${formatarData(v.fim)}</p>
+                    <p><strong>Motorista:</strong> ${v.motorista || '—'}</p>
+                    <p><strong>RFID:</strong> ${v.cartao_rfid || '—'}</p>
+                    <p><strong>Chuva detectada:</strong> ${v.chuva_detectada ? 'Sim' : 'Não'}</p>
+                    <p><strong>Início (maps):</strong> <a href="https://www.google.com/maps?q=${v.origem_lat},${v.origem_lng}" target="_blank">Ver no mapa</a></p>
+                    <p><strong>Fim (maps):</strong> <a href="https://www.google.com/maps?q=${v.destino_lat},${v.destino_lng}" target="_blank">Ver no mapa</a></p>
+                    <p><strong>Alertas na viagem:</strong> ${v.total_alertas}</p>
+                    <div class="alertas">${alertasHTML || '<p>Nenhum alerta registrado</p>'}</div>
+                </div>
+                <hr/>
+            `;
+        }
+
+        const dataEmissao = new Date().toLocaleString('pt-BR');
+
+        // 🔹 Substitui os placeholders do HTML
+        html = html
+            .replace('{{DATA_EMISSAO}}', dataEmissao)
+            .replace('{{ID}}', veiculo.id)
+            .replace('{{IDENTIFICADOR}}', veiculo.identificador)
+            .replace('{{MODELO}}', veiculo.modelo)
+            .replace('{{STATUS}}', veiculo.status)
+            .replace('{{TOTAL_VIAGENS}}', veiculo.total_viagens)
+            .replace('{{TOTAL_ALERTAS}}', veiculo.total_alertas)
+            .replace('{{ULTIMO_REGISTRO}}', formatarData(veiculo.ultimo_registro))
+            .replace('{{ULTIMO_MOTORISTA}}', veiculo.ultimo_motorista || '—')
+            .replace('{{LISTA_VIAGENS}}', viagensHTML || '<p>Nenhuma viagem registrada</p>');
+
+        // 🔹 Gera o PDF
+        const browser = await puppeteer.launch();
+        const page = await browser.newPage();
+        await page.setContent(html, { waitUntil: 'networkidle0' });
+
+        const pdfBuffer = await page.pdf({
+            format: 'A4',
+            printBackground: true,
+            margin: { top: '20mm', right: '20mm', bottom: '20mm', left: '20mm' }
+        });
+
+        await browser.close();
+
+        // 🔹 Retorna o PDF
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="relatorio_veiculo_${veiculo.identificador}.pdf"`);
+        res.send(pdfBuffer);
+
+    } catch (erro) {
+        console.error('Erro ao gerar relatório:', erro);
+        res.status(500).json({ erro: 'Erro ao gerar relatório' });
+    }
+});
+
+
+
+
+
+
+
+
 
 export default router;

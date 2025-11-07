@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Relatório de Veículo</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 20mm;
+        }
+
+        body {
+            font-family: "Arial", sans-serif;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            font-size: 12pt;
+        }
+
+        header {
+            text-align: center;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+
+        header img {
+            width: 120px;
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            color: #004222;
+            font-size: 22pt;
+            margin: 0;
+        }
+
+        section {
+            margin-bottom: 25px;
+            page-break-inside: avoid;
+        }
+
+        h2 {
+            font-size: 12pt;
+            margin: 0;
+        }
+
+        .destaqueTitulo {
+            background-color: #004222;
+            color: white;
+            padding: 3px;
+        }
+
+        .info {
+            margin-top: 10px;
+        }
+
+        .info p {
+            margin: 3px 0;
+        }
+
+        .tabela {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+
+        .tabela th,
+        .tabela td {
+            border: 1px solid #ccc;
+            padding: 6px 8px;
+            font-size: 10pt;
+        }
+
+        .tabela th {
+            background-color: #f2f2f2;
+            text-align: left;
+        }
+
+        .bloco-viagem {
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-top: 10px;
+            background: #fafafa;
+        }
+
+        .bloco-viagem p {
+            margin: 0;
+        }
+
+        .alerta {
+            margin-left: 15px;
+            padding-left: 10px;
+            border-left: 3px solid #004222;
+            margin-top: 8px;
+        }
+
+        a {
+            color: #0077cc;
+            text-decoration: none;
+        }
+
+        footer {
+            position: fixed;
+            bottom: 10mm;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 10pt;
+            color: #666;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <img src="../assets/img/SITREV_LOGO.png" alt="Logo da Empresa" />
+        <h1>Relatório de Telemetria</h1>
+        <p>Emitido em: <strong>06/11/2025</strong></p>
+    </header>
+
+    <!-- 🔹 Informações do veículo -->
+    <section>
+        <div class="destaqueTitulo">
+            <h2>Informações do Veículo</h2>
+        </div>
+
+        <div class="info">
+            <p><strong>ID:</strong> 2</p>
+            <p><strong>Identificador:</strong> LSN4I49</p>
+            <p><strong>Modelo:</strong> VW POLO 2024</p>
+            <p><strong>Status:</strong> parado</p>
+            <p><strong>Total de viagens:</strong> 97</p>
+            <p><strong>Total de alertas:</strong> 4</p>
+            <p><strong>Último registro:</strong> quarta-feira, 08 de out. de 2025, 17:13:34</p>
+            <p><strong>Último motorista:</strong> David Duarte</p>
+        </div>
+    </section>
+
+    <!-- 🔹 Viagens -->
+    <section>
+        <div class="destaqueTitulo">
+            <h2>Viagens Registradas</h2>
+        </div>
+
+        <div class="bloco-viagem">
+            <p><strong>Viagem:</strong> 203</p>
+            <p><strong>Início:</strong> quarta-feira, 08 de out. de 2025, 17:01:39</p>
+            <p><strong>Fim:</strong> quarta-feira, 08 de out. de 2025, 17:13:34</p>
+            <p><strong>Motorista:</strong> David Duarte</p>
+            <p><strong>RFID:</strong> 5348D394</p>
+            <p><strong>Chuva detectada:</strong> Não</p>
+            <p><strong>Início (maps):</strong> <a href="https://www.google.com/maps?q=-3.757600,-49.683205"
+                    target="_blank">Ver no mapa</a></p>
+            <p><strong>Fim (maps):</strong> <a href="https://www.google.com/maps?q=-3.754669,-49.675095"
+                    target="_blank">Ver no mapa</a></p>
+            <p><strong>Alertas na viagem:</strong> 1</p>
+
+            <div class="alerta">
+                <p><strong>Alerta 40:</strong> limite_velocidade</p>
+                <p><strong>Data:</strong> quarta-feira, 08 de out. de 2025, 17:06:07</p>
+                <p><strong>Descrição:</strong> Excesso de velocidade por 7 registros consecutivos. Velocidade máxima: 67
+                    km/h</p>
+                <p><strong>Local (maps):</strong> <a href="https://www.google.com/maps?q=-3.746462,-49.691021"
+                        target="_blank">Ver no mapa</a></p>
+                <p><strong>Registros associados:</strong> 6</p>
+            </div>
+        </div>
+
+    </section>
+
+    <footer>
+        SITREV © 2025
+    </footer>
+</body>
+
+</html>

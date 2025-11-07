@@ -17,7 +17,9 @@
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "luxon": "^3.7.1",
+    "pdfkit": "^0.17.2",
     "pg": "^8.16.0",
+    "puppeteer": "^24.29.1",
     "telemetria-backend": "file:"
   },
   "devDependencies": {
