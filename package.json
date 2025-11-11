@@ -14,16 +14,21 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@sparticuz/chromium": "^141.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "luxon": "^3.7.1",
     "pdfkit": "^0.17.2",
     "pg": "^8.16.0",
-    "puppeteer": "^22.15.0",
+    "puppeteer": "^24.29.1",
+    "puppeteer-core": "^24.29.1",
     "telemetria-backend": "file:"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }

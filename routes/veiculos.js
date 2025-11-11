@@ -1,7 +1,10 @@
 import express from 'express';
 import db from '../db.js';
 
+// import puppeteer from 'puppeteer-core';
 import puppeteer from 'puppeteer';
+import chromium from '@sparticuz/chromium';
+
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -321,10 +324,10 @@ router.get('/:id', async (req, res) => {
 
 router.get('/relatorio/:id', async (req, res) => {
     const { id } = req.params;
-
     let browser;
+
     try {
-        // 🔹 Consulta o veículo
+        // 🔹 Consulta veículo
         const veiculoQuery = `
             SELECT 
                 v.id, v.identificador, v.modelo, v.status,
@@ -379,22 +382,20 @@ router.get('/relatorio/:id', async (req, res) => {
         const templatePath = path.resolve('./views/relatorio-veiculo.html');
         let html = fs.readFileSync(templatePath, 'utf8');
 
-        // 🔹 Monta blocos de viagens
+        // 🔹 Monta blocos HTML
         const formatarData = (data) => data ? new Date(data).toLocaleString('pt-BR') : '—';
 
         let viagensHTML = '';
         for (const v of viagens) {
             const alertasDaViagem = alertas.filter(a => a.viagem_id === v.id);
-
-            let alertasHTML = '';
-            for (const a of alertasDaViagem) {
-                alertasHTML += `
+            const alertasHTML = alertasDaViagem.map(a => `
+                <div class="alerta">
                     <p><strong>- Alerta ${a.id}:</strong> ${a.tipo} (${formatarData(a.data)})</p>
                     <p><strong>Descrição:</strong> ${a.descricao || '—'}</p>
-                    <p><strong>Local (maps):</strong> <a href="https://www.google.com/maps?q=${a.latitude},${a.longitude}" target="_blank">Ver no mapa</a></p>
-                    <p><strong>Registros associados:</strong> ${a.qtd_registros}</p>
-                `;
-            }
+                    <p><strong>Local:</strong> <a href="https://www.google.com/maps?q=${a.latitude},${a.longitude}" target="_blank">Ver no mapa</a></p>
+                    <p><strong>Registros:</strong> ${a.qtd_registros}</p>
+                </div>
+            `).join('');
 
             viagensHTML += `
                 <div class="viagem">
@@ -403,19 +404,18 @@ router.get('/relatorio/:id', async (req, res) => {
                     <p><strong>Fim:</strong> ${formatarData(v.fim)}</p>
                     <p><strong>Motorista:</strong> ${v.motorista || '—'}</p>
                     <p><strong>RFID:</strong> ${v.cartao_rfid || '—'}</p>
-                    <p><strong>Chuva detectada:</strong> ${v.chuva_detectada ? 'Sim' : 'Não'}</p>
-                    <p><strong>Início (maps):</strong> <a href="https://www.google.com/maps?q=${v.origem_lat},${v.origem_lng}" target="_blank">Ver no mapa</a></p>
-                    <p><strong>Fim (maps):</strong> <a href="https://www.google.com/maps?q=${v.destino_lat},${v.destino_lng}" target="_blank">Ver no mapa</a></p>
-                    <p><strong>Alertas na viagem:</strong> ${v.total_alertas}</p>
-                    <div class="alertas">${alertasHTML || '<p>Nenhum alerta registrado</p>'}</div>
+                    <p><strong>Chuva:</strong> ${v.chuva_detectada ? 'Sim' : 'Não'}</p>
+                    <p><strong>Início:</strong> <a href="https://www.google.com/maps?q=${v.origem_lat},${v.origem_lng}" target="_blank">Ver no mapa</a></p>
+                    <p><strong>Fim:</strong> <a href="https://www.google.com/maps?q=${v.destino_lat},${v.destino_lng}" target="_blank">Ver no mapa</a></p>
+                    <p><strong>Alertas:</strong> ${v.total_alertas}</p>
+                    <div class="alertas">${alertasHTML || '<p>Nenhum alerta</p>'}</div>
                 </div>
                 <hr/>
             `;
         }
 
+        // 🔹 Substitui placeholders
         const dataEmissao = new Date().toLocaleString('pt-BR');
-
-        // 🔹 Substitui os placeholders do HTML
         html = html
             .replace('{{DATA_EMISSAO}}', dataEmissao)
             .replace('{{ID}}', veiculo.id)
@@ -428,115 +428,52 @@ router.get('/relatorio/:id', async (req, res) => {
             .replace('{{ULTIMO_MOTORISTA}}', veiculo.ultimo_motorista || '—')
             .replace('{{LISTA_VIAGENS}}', viagensHTML || '<p>Nenhuma viagem registrada</p>');
 
-        // 🔹 Configuração para diferentes ambientes
-        const isRender = process.env.RENDER === 'true';
+        // 🔹 Lógica do Puppeteer
+        const isRender = !!process.env.RENDER;
+        const launchOptions = isRender
+            ? {
+                args: chromium.args,
+                executablePath: await chromium.executablePath(),
+                headless: chromium.headless
+            }
+            : { headless: true };
 
-        const launchOptions = {
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--disable-web-security',
-                '--disable-features=VizDisplayCompositor'
-            ],
-            timeout: 30000
-        };
+        const puppeteerLib = isRender
+            ? (await import('puppeteer-core')).default
+            : (await import('puppeteer')).default;
 
-        // 🔹 Configuração específica para o Render
-        if (isRender) {
-            // No Render, use o Chromium do sistema
-            launchOptions.executablePath = '/usr/bin/chromium-browser';
-            // Adicionar args específicos para o Render
-            launchOptions.args.push(
-                '--single-process',
-                '--no-zygote',
-                '--disable-software-rasterizer',
-                '--disable-background-timer-throttling'
-            );
-        }
-
-        console.log('Iniciando Puppeteer...');
-        console.log('Ambiente:', isRender ? 'Render' : 'Local');
-        if (isRender) {
-            console.log('Usando Chromium do sistema no Render');
-        }
-
-        browser = await puppeteer.launch(launchOptions);
-
+        browser = await puppeteerLib.launch(launchOptions);
         const page = await browser.newPage();
 
-        // Configurar timeouts
-        page.setDefaultNavigationTimeout(30000);
-        page.setDefaultTimeout(30000);
+        // Criar arquivo temporário local
+        const tempFile = path.join(process.cwd(), `temp_relatorio_${Date.now()}.html`);
+        fs.writeFileSync(tempFile, html, 'utf8');
 
-        console.log('Configurando conteúdo da página...');
+        await page.goto(`file://${tempFile}`, { waitUntil: 'load', timeout: 15000 });
+        await new Promise(r => setTimeout(r, 1000));
 
-        // Usar arquivo temporário
-        const tempFilePath = path.join(__dirname, 'temp_relatorio_' + Date.now() + '.html');
-        fs.writeFileSync(tempFilePath, html, 'utf8');
+        const pdf = await page.pdf({
+            format: 'A4',
+            printBackground: true,
+            margin: { top: '20mm', right: '20mm', bottom: '20mm', left: '20mm' }
+        });
 
-        try {
-            console.log('Carregando arquivo temporário...');
-            await page.goto(`file://${tempFilePath}`, {
-                waitUntil: 'load',
-                timeout: 15000
-            });
+        // Limpar arquivo e fechar browser
+        fs.unlinkSync(tempFile);
+        await browser.close();
 
-            // Aguardar um pouco para garantir que tudo carregou
-            await new Promise(resolve => setTimeout(resolve, 2000));
-
-            console.log('Gerando PDF...');
-
-            // Gerar PDF
-            const pdfBuffer = await page.pdf({
-                format: 'A4',
-                printBackground: true,
-                margin: { top: '20mm', right: '20mm', bottom: '20mm', left: '20mm' }
-            });
-
-            console.log('PDF gerado com sucesso!');
-
-            // 🔹 Retorna o PDF
-            res.setHeader('Content-Type', 'application/pdf');
-            res.setHeader('Content-Disposition', `attachment; filename="relatorio_veiculo_${veiculo.identificador}.pdf"`);
-            res.send(pdfBuffer);
-
-        } finally {
-            // Limpeza do arquivo temporário
-            if (fs.existsSync(tempFilePath)) {
-                fs.unlinkSync(tempFilePath);
-            }
-        }
+        // Enviar PDF
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="relatorio_${veiculo.identificador}.pdf"`);
+        res.send(pdf);
 
     } catch (erro) {
         console.error('Erro ao gerar relatório:', erro);
-
-        // Fechar o browser de forma segura
-        if (browser) {
-            try {
-                await browser.close();
-            } catch (closeError) {
-                console.error('Erro ao fechar browser:', closeError);
-            }
-        }
-
-        res.status(500).json({
-            erro: 'Erro ao gerar relatório',
-            detalhes: process.env.NODE_ENV === 'development' ? erro.message : 'Erro interno do servidor'
-        });
-    } finally {
-        // Garantir que o browser seja fechado
-        if (browser) {
-            try {
-                await browser.close();
-            } catch (closeError) {
-                console.error('Erro ao fechar browser no finally:', closeError);
-            }
-        }
+        if (browser) await browser.close();
+        res.status(500).json({ erro: 'Falha ao gerar relatório', detalhes: erro.message });
     }
 });
+
 
 
 
