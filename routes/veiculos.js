@@ -383,7 +383,11 @@ router.get('/relatorio/:id', async (req, res) => {
         let html = fs.readFileSync(templatePath, 'utf8');
 
         // 🔹 Monta blocos HTML
-        const formatarData = (data) => data ? new Date(data).toLocaleString('pt-BR') : '—';
+        const formatarData = (data) => {
+            if (!data) return '—';
+            return new Date(data).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+        };
+
 
         let viagensHTML = '';
         for (const v of viagens) {
@@ -415,7 +419,8 @@ router.get('/relatorio/:id', async (req, res) => {
         }
 
         // 🔹 Substitui placeholders
-        const dataEmissao = new Date().toLocaleString('pt-BR');
+        const dataEmissao = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+
         html = html
             .replace('{{DATA_EMISSAO}}', dataEmissao)
             .replace('{{ID}}', veiculo.id)
