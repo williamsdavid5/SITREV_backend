@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Relatório de Motorista</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 20mm;
+        }
+
+        body {
+            font-family: "Arial", sans-serif;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            font-size: 12pt;
+        }
+
+        header {
+            text-align: center;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+
+        header img {
+            width: 120px;
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            color: #004222;
+            font-size: 22pt;
+            margin: 0;
+        }
+
+        section {
+            margin-bottom: 25px;
+            page-break-inside: avoid;
+        }
+
+        h2 {
+            font-size: 12pt;
+            margin: 0;
+        }
+
+        .destaqueTitulo {
+            background-color: #004222;
+            color: white;
+            padding: 3px;
+        }
+
+        .info {
+            margin-top: 10px;
+        }
+
+        .info p {
+            margin: 3px 0;
+        }
+
+        .bloco-viagem {
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-top: 10px;
+            background: #fafafa;
+        }
+
+        .bloco-viagem p {
+            margin: 0;
+        }
+
+        .alerta {
+            margin-left: 15px;
+            padding-left: 10px;
+            border-left: 3px solid #004222;
+            margin-top: 8px;
+        }
+
+        a {
+            color: #0077cc;
+            text-decoration: none;
+        }
+
+        footer {
+            position: fixed;
+            bottom: 10mm;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 10pt;
+            color: #666;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <img src="https://raw.githubusercontent.com/williamsdavid5/SITREV_backend/refs/heads/main/assets/img/SITREV_LOGO.png"
+            alt="Logo da Empresa" />
+        <h1>Relatório de Motorista</h1>
+        <p>Emitido em: <strong>{{DATA_EMISSAO}}</strong></p>
+    </header>
+
+    <!-- 🔹 Informações do motorista -->
+    <section>
+        <div class="destaqueTitulo">
+            <h2>Informações do Motorista</h2>
+        </div>
+
+        <div class="info">
+            <p><strong>ID:</strong> {{ID}}</p>
+            <p><strong>Nome:</strong> {{NOME}}</p>
+            <p><strong>Cartão RFID:</strong> {{CARTAO}}</p>
+            <p><strong>Total de viagens:</strong> {{TOTAL_VIAGENS}}</p>
+            <p><strong>Total de alertas:</strong> {{TOTAL_ALERTAS}}</p>
+            <p><strong>Última viagem:</strong> {{ULTIMA_VIAGEM}}</p>
+            <p><strong>Último veículo usado:</strong> {{ULTIMO_VEICULO_IDENTIFICADOR}} ({{ULTIMO_VEICULO_MODELO}}) - ID:
+                {{ULTIMO_VEICULO_ID}}</p>
+        </div>
+    </section>
+
+    <!-- 🔹 Viagens -->
+    <section>
+        <div class="destaqueTitulo">
+            <h2>Viagens Registradas</h2>
+        </div>
+
+        {{LISTA_VIAGENS}}
+    </section>
+
+    <footer>
+        SITREV © 2025
+    </footer>
+</body>
+
+</html>

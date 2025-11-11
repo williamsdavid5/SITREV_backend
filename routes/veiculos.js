@@ -426,7 +426,7 @@ router.get('/relatorio/:id', async (req, res) => {
             .replace('{{ID}}', veiculo.id)
             .replace('{{IDENTIFICADOR}}', veiculo.identificador)
             .replace('{{MODELO}}', veiculo.modelo)
-            .replace('{{STATUS}}', veiculo.status)
+            // .replace('{{STATUS}}', veiculo.status)
             .replace('{{TOTAL_VIAGENS}}', veiculo.total_viagens)
             .replace('{{TOTAL_ALERTAS}}', veiculo.total_alertas)
             .replace('{{ULTIMO_REGISTRO}}', formatarData(veiculo.ultimo_registro))
