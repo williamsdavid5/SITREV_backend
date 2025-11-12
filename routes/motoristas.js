@@ -309,42 +309,79 @@ router.delete('/:id', async (req, res) => {
 
 router.get('/relatorio/:id', async (req, res) => {
     const { id } = req.params;
+    const { tipo = 'completo', inicio, fim } = req.query; // 🔹 ADICIONAR ESTA LINHA
     let browser;
 
     try {
         // 🔹 Consulta motorista (COM ÚLTIMO VEÍCULO)
         const motoristaQuery = `
-    SELECT 
-        m.id, m.nome, m.cartao_rfid,
-        (SELECT COUNT(*) FROM viagens WHERE motorista_id = m.id) AS total_viagens,
-        (SELECT COUNT(*) FROM alertas a 
-         JOIN viagens v ON v.id = a.viagem_id 
-         WHERE v.motorista_id = m.id) AS total_alertas,
-        (SELECT MAX(inicio) FROM viagens WHERE motorista_id = m.id) AS ultima_viagem,
-        (SELECT v.id FROM veiculos v
-         JOIN viagens vi ON vi.veiculo_id = v.id
-         WHERE vi.motorista_id = m.id
-         ORDER BY vi.inicio DESC
-         LIMIT 1) AS ultimo_veiculo_id,
-        (SELECT v.identificador FROM veiculos v
-         JOIN viagens vi ON vi.veiculo_id = v.id
-         WHERE vi.motorista_id = m.id
-         ORDER BY vi.inicio DESC
-         LIMIT 1) AS ultimo_veiculo_identificador,
-        (SELECT v.modelo FROM veiculos v
-         JOIN viagens vi ON vi.veiculo_id = v.id
-         WHERE vi.motorista_id = m.id
-         ORDER BY vi.inicio DESC
-         LIMIT 1) AS ultimo_veiculo_modelo
-    FROM motoristas m
-    WHERE m.id = $1
-`;
+            SELECT 
+                m.id, m.nome, m.cartao_rfid,
+                (SELECT COUNT(*) FROM viagens WHERE motorista_id = m.id) AS total_viagens,
+                (SELECT COUNT(*) FROM alertas a 
+                 JOIN viagens v ON v.id = a.viagem_id 
+                 WHERE v.motorista_id = m.id) AS total_alertas,
+                (SELECT MAX(inicio) FROM viagens WHERE motorista_id = m.id) AS ultima_viagem,
+                (SELECT v.id FROM veiculos v
+                 JOIN viagens vi ON vi.veiculo_id = v.id
+                 WHERE vi.motorista_id = m.id
+                 ORDER BY vi.inicio DESC
+                 LIMIT 1) AS ultimo_veiculo_id,
+                (SELECT v.identificador FROM veiculos v
+                 JOIN viagens vi ON vi.veiculo_id = v.id
+                 WHERE vi.motorista_id = m.id
+                 ORDER BY vi.inicio DESC
+                 LIMIT 1) AS ultimo_veiculo_identificador,
+                (SELECT v.modelo FROM veiculos v
+                 JOIN viagens vi ON vi.veiculo_id = v.id
+                 WHERE vi.motorista_id = m.id
+                 ORDER BY vi.inicio DESC
+                 LIMIT 1) AS ultimo_veiculo_modelo
+            FROM motoristas m
+            WHERE m.id = $1
+        `;
         const { rows: motoristas } = await db.query(motoristaQuery, [id]);
         if (!motoristas.length) return res.status(404).json({ erro: 'Motorista não encontrado' });
         const motorista = motoristas[0];
 
-        // 🔹 Consulta viagens do motorista (COM CAMPOS DO VEÍCULO)
-        const viagensQuery = `
+        // 🔹 Função para converter data dd/mm/aaaa para formato ISO
+        const converterData = (dataString, ehFim = false) => {
+            if (!dataString) return null;
+
+            const [dia, mes, ano] = dataString.split('/');
+            if (!dia || !mes || !ano) return null;
+
+            // Garante que o ano tenha 4 dígitos
+            const anoCompleto = ano.length === 2 ? `20${ano}` : ano;
+
+            // Para a data final, adiciona 23:59:59 para incluir todo o dia
+            if (ehFim) {
+                return `${anoCompleto}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}T23:59:59.999Z`;
+            }
+
+            return `${anoCompleto}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}T00:00:00.000Z`;
+        };
+
+        // 🔹 Monta filtro de data (se existir)
+        let filtroData = "";
+        const params = [id];
+
+        const dataInicioISO = converterData(inicio, false);
+        const dataFimISO = converterData(fim, true);
+
+        if (dataInicioISO && dataFimISO) {
+            filtroData = `AND vi.inicio BETWEEN $2 AND $3`;
+            params.push(dataInicioISO, dataFimISO);
+        } else if (dataInicioISO) {
+            filtroData = `AND vi.inicio >= $2`;
+            params.push(dataInicioISO);
+        } else if (dataFimISO) {
+            filtroData = `AND vi.inicio <= $2`;
+            params.push(dataFimISO);
+        }
+
+        // 🔹 Consulta viagens do motorista (COM FILTROS)
+        let viagensQuery = `
             SELECT 
                 vi.id, vi.inicio, vi.fim, vi.chuva_detectada,
                 vi.origem_lat, vi.origem_lng, vi.destino_lat, vi.destino_lng,
@@ -355,12 +392,18 @@ router.get('/relatorio/:id', async (req, res) => {
             FROM viagens vi
             LEFT JOIN veiculos v ON vi.veiculo_id = v.id
             WHERE vi.motorista_id = $1
+            ${filtroData}
             ORDER BY vi.inicio DESC
         `;
-        const { rows: viagens } = await db.query(viagensQuery, [id]);
 
-        // 🔹 Consulta alertas do motorista
-        const alertasQuery = `
+        if (tipo === 'resumido') {
+            viagensQuery += ` LIMIT 1`;
+        }
+
+        const { rows: viagens } = await db.query(viagensQuery, params);
+
+        // 🔹 Consulta alertas do motorista (COM FILTROS)
+        let alertasQuery = `
             SELECT 
                 a.id, a.tipo, a.descricao, a.timestamp AS data,
                 a.viagem_id,
@@ -378,9 +421,16 @@ router.get('/relatorio/:id', async (req, res) => {
             JOIN viagens vi ON vi.id = a.viagem_id
             JOIN veiculos v ON vi.veiculo_id = v.id
             WHERE vi.motorista_id = $1
+            ${tipo === 'resumido' && viagens.length > 0 ? `AND a.viagem_id = $2` : ""}
             ORDER BY a.timestamp DESC
         `;
-        const { rows: alertas } = await db.query(alertasQuery, [id]);
+
+        const alertasParams = [id];
+        if (tipo === 'resumido' && viagens.length > 0) {
+            alertasParams.push(viagens[0].id);
+        }
+
+        const { rows: alertas } = await db.query(alertasQuery, alertasParams);
 
         // 🔹 Lê o HTML base
         const templatePath = path.resolve('./views/relatorio-motorista.html');
@@ -423,7 +473,22 @@ router.get('/relatorio/:id', async (req, res) => {
             `;
         }
 
-        // 🔹 Substitui placeholders
+        // 🔹 Adiciona informações do filtro no relatório
+        const infoFiltro = [];
+        if (tipo === 'resumido') {
+            infoFiltro.push('Relatório Resumido (última viagem)');
+        } else {
+            infoFiltro.push('Relatório Completo');
+        }
+
+        if (inicio && fim) {
+            infoFiltro.push(`Período: ${inicio} a ${fim}`);
+        } else if (inicio) {
+            infoFiltro.push(`A partir de: ${inicio}`);
+        } else if (fim) {
+            infoFiltro.push(`Até: ${fim}`);
+        }
+
         const dataEmissao = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
         html = html
@@ -437,9 +502,10 @@ router.get('/relatorio/:id', async (req, res) => {
             .replace('{{ULTIMO_VEICULO_ID}}', motorista.ultimo_veiculo_id || '—')
             .replace('{{ULTIMO_VEICULO_IDENTIFICADOR}}', motorista.ultimo_veiculo_identificador || '—')
             .replace('{{ULTIMO_VEICULO_MODELO}}', motorista.ultimo_veiculo_modelo || '—')
-            .replace('{{LISTA_VIAGENS}}', viagensHTML || '<p>Nenhuma viagem registrada</p>');
+            .replace('{{LISTA_VIAGENS}}', viagensHTML || '<p>Nenhuma viagem registrada</p>')
+            .replace('{{INFO_FILTRO}}', infoFiltro.length > 0 ? `<p><strong>Filtros aplicados:</strong> ${infoFiltro.join(' | ')}</p>` : '');
 
-        // 🔹 Lógica do Puppeteer (mesma do relatório de veículo)
+        // 🔹 Lógica do Puppeteer (simplificada)
         const isRender = !!process.env.RENDER;
         const launchOptions = isRender
             ? {
@@ -456,12 +522,8 @@ router.get('/relatorio/:id', async (req, res) => {
         browser = await puppeteerLib.launch(launchOptions);
         const page = await browser.newPage();
 
-        // Criar arquivo temporário local
-        const tempFile = path.join(process.cwd(), `temp_relatorio_motorista_${Date.now()}.html`);
-        fs.writeFileSync(tempFile, html, 'utf8');
-
-        await page.goto(`file://${tempFile}`, { waitUntil: 'load', timeout: 15000 });
-        await new Promise(r => setTimeout(r, 1000));
+        await page.setContent(html, { waitUntil: 'load' });
+        await new Promise(r => setTimeout(r, 500));
 
         const pdf = await page.pdf({
             format: 'A4',
@@ -469,13 +531,19 @@ router.get('/relatorio/:id', async (req, res) => {
             margin: { top: '20mm', right: '20mm', bottom: '20mm', left: '20mm' }
         });
 
-        // Limpar arquivo e fechar browser
-        fs.unlinkSync(tempFile);
         await browser.close();
 
         // Enviar PDF
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename="relatorio_motorista_${motorista.nome.replace(/\s+/g, '_')}.pdf"`);
+
+        // Nome do arquivo com informações do filtro
+        let filename = `relatorio_motorista_${motorista.nome.replace(/\s+/g, '_')}`;
+        if (tipo === 'resumido') filename += '_resumido';
+        if (inicio) filename += `_de_${inicio.replace(/\//g, '-')}`;
+        if (fim) filename += `_ate_${fim.replace(/\//g, '-')}`;
+        filename += '.pdf';
+
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.send(pdf);
 
     } catch (erro) {
