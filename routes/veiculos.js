@@ -324,6 +324,7 @@ router.get('/:id', async (req, res) => {
 
 router.get('/relatorio/:id', async (req, res) => {
     const { id } = req.params;
+    const { tipo = 'completo', inicio, fim } = req.query;
     let browser;
 
     try {
@@ -346,8 +347,44 @@ router.get('/relatorio/:id', async (req, res) => {
         if (!veiculos.length) return res.status(404).json({ erro: 'Veículo não encontrado' });
         const veiculo = veiculos[0];
 
-        // 🔹 Consulta viagens
-        const viagensQuery = `
+        // 🔹 Função para converter data dd/mm/aaaa para formato ISO
+        const converterData = (dataString, ehFim = false) => {
+            if (!dataString) return null;
+
+            const [dia, mes, ano] = dataString.split('/');
+            if (!dia || !mes || !ano) return null;
+
+            // Garante que o ano tenha 4 dígitos
+            const anoCompleto = ano.length === 2 ? `20${ano}` : ano;
+
+            // Para a data final, adiciona 23:59:59 para incluir todo o dia
+            if (ehFim) {
+                return `${anoCompleto}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}T23:59:59.999Z`;
+            }
+
+            return `${anoCompleto}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}T00:00:00.000Z`;
+        };
+
+        // 🔹 Monta filtro de data (se existir)
+        let filtroData = "";
+        const params = [id];
+
+        const dataInicioISO = converterData(inicio, false);
+        const dataFimISO = converterData(fim, true); // true indica que é data final
+
+        if (dataInicioISO && dataFimISO) {
+            filtroData = `AND vi.inicio BETWEEN $2 AND $3`;
+            params.push(dataInicioISO, dataFimISO);
+        } else if (dataInicioISO) {
+            filtroData = `AND vi.inicio >= $2`;
+            params.push(dataInicioISO);
+        } else if (dataFimISO) {
+            filtroData = `AND vi.inicio <= $2`;
+            params.push(dataFimISO);
+        }
+
+        // 🔹 Base da query de viagens
+        let viagensQuery = `
             SELECT 
                 vi.id, vi.inicio, vi.fim, vi.chuva_detectada,
                 vi.origem_lat, vi.origem_lng, vi.destino_lat, vi.destino_lng,
@@ -356,27 +393,45 @@ router.get('/relatorio/:id', async (req, res) => {
             FROM viagens vi
             LEFT JOIN motoristas m ON vi.motorista_id = m.id
             WHERE vi.veiculo_id = $1
+            ${filtroData}
             ORDER BY vi.inicio DESC
         `;
-        const { rows: viagens } = await db.query(viagensQuery, [id]);
 
-        // 🔹 Consulta alertas
-        const alertasQuery = `
-            SELECT 
-                a.id, a.tipo, a.descricao, a.timestamp AS data,
-                a.viagem_id,
-                (SELECT COUNT(*) FROM registros_alertas ra WHERE ra.alerta_id = a.id) AS qtd_registros,
-                (SELECT r.latitude FROM registros r
-                 JOIN registros_alertas ra ON ra.registro_id = r.id
-                 WHERE ra.alerta_id = a.id LIMIT 1) AS latitude,
-                (SELECT r.longitude FROM registros r
-                 JOIN registros_alertas ra ON ra.registro_id = r.id
-                 WHERE ra.alerta_id = a.id LIMIT 1) AS longitude
-            FROM alertas a
-            WHERE a.veiculo_id = $1
-            ORDER BY a.timestamp DESC
-        `;
-        const { rows: alertas } = await db.query(alertasQuery, [id]);
+        if (tipo === 'resumido') {
+            viagensQuery += ` LIMIT 1`;
+        }
+
+        const { rows: viagens } = await db.query(viagensQuery, params);
+
+        // 🔹 Se tipo resumido, pega alertas só da última viagem
+        let alertas = [];
+        if (viagens.length > 0) {
+            const viagemIds = viagens.map(v => v.id);
+            const alertasQuery = `
+                SELECT 
+                    a.id, a.tipo, a.descricao, a.timestamp AS data,
+                    a.viagem_id,
+                    (SELECT COUNT(*) FROM registros_alertas ra WHERE ra.alerta_id = a.id) AS qtd_registros,
+                    (SELECT r.latitude FROM registros r
+                     JOIN registros_alertas ra ON ra.registro_id = r.id
+                     WHERE ra.alerta_id = a.id LIMIT 1) AS latitude,
+                    (SELECT r.longitude FROM registros r
+                     JOIN registros_alertas ra ON ra.registro_id = r.id
+                     WHERE ra.alerta_id = a.id LIMIT 1) AS longitude
+                FROM alertas a
+                WHERE a.veiculo_id = $1
+                ${tipo === 'resumido' ? `AND a.viagem_id = $2` : ""}
+                ORDER BY a.timestamp DESC
+            `;
+
+            const alertasParams = [id];
+            if (tipo === 'resumido') {
+                alertasParams.push(viagemIds[0]);
+            }
+
+            const { rows } = await db.query(alertasQuery, alertasParams);
+            alertas = rows;
+        }
 
         // 🔹 Lê o HTML base
         const templatePath = path.resolve('./views/relatorio-veiculo.html');
@@ -387,7 +442,6 @@ router.get('/relatorio/:id', async (req, res) => {
             if (!data) return '—';
             return new Date(data).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
         };
-
 
         let viagensHTML = '';
         for (const v of viagens) {
@@ -418,7 +472,22 @@ router.get('/relatorio/:id', async (req, res) => {
             `;
         }
 
-        // 🔹 Substitui placeholders
+        // 🔹 Adiciona informações do filtro no relatório
+        const infoFiltro = [];
+        if (tipo === 'resumido') {
+            infoFiltro.push('Relatório Resumido (última viagem)');
+        } else {
+            infoFiltro.push('Relatório Completo');
+        }
+
+        if (inicio && fim) {
+            infoFiltro.push(`Período: ${inicio} a ${fim}`);
+        } else if (inicio) {
+            infoFiltro.push(`A partir de: ${inicio}`);
+        } else if (fim) {
+            infoFiltro.push(`Até: ${fim}`);
+        }
+
         const dataEmissao = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 
         html = html
@@ -426,12 +495,12 @@ router.get('/relatorio/:id', async (req, res) => {
             .replace('{{ID}}', veiculo.id)
             .replace('{{IDENTIFICADOR}}', veiculo.identificador)
             .replace('{{MODELO}}', veiculo.modelo)
-            // .replace('{{STATUS}}', veiculo.status)
             .replace('{{TOTAL_VIAGENS}}', veiculo.total_viagens)
             .replace('{{TOTAL_ALERTAS}}', veiculo.total_alertas)
             .replace('{{ULTIMO_REGISTRO}}', formatarData(veiculo.ultimo_registro))
             .replace('{{ULTIMO_MOTORISTA}}', veiculo.ultimo_motorista || '—')
-            .replace('{{LISTA_VIAGENS}}', viagensHTML || '<p>Nenhuma viagem registrada</p>');
+            .replace('{{LISTA_VIAGENS}}', viagensHTML || '<p>Nenhuma viagem registrada</p>')
+            .replace('{{INFO_FILTRO}}', infoFiltro.length > 0 ? `<p><strong>Filtros aplicados:</strong> ${infoFiltro.join(' | ')}</p>` : '');
 
         // 🔹 Lógica do Puppeteer
         const isRender = !!process.env.RENDER;
@@ -450,12 +519,8 @@ router.get('/relatorio/:id', async (req, res) => {
         browser = await puppeteerLib.launch(launchOptions);
         const page = await browser.newPage();
 
-        // Criar arquivo temporário local
-        const tempFile = path.join(process.cwd(), `temp_relatorio_${Date.now()}.html`);
-        fs.writeFileSync(tempFile, html, 'utf8');
-
-        await page.goto(`file://${tempFile}`, { waitUntil: 'load', timeout: 15000 });
-        await new Promise(r => setTimeout(r, 1000));
+        await page.setContent(html, { waitUntil: 'load' });
+        await new Promise(r => setTimeout(r, 500));
 
         const pdf = await page.pdf({
             format: 'A4',
@@ -463,13 +528,19 @@ router.get('/relatorio/:id', async (req, res) => {
             margin: { top: '20mm', right: '20mm', bottom: '20mm', left: '20mm' }
         });
 
-        // Limpar arquivo e fechar browser
-        fs.unlinkSync(tempFile);
         await browser.close();
 
         // Enviar PDF
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename="relatorio_${veiculo.identificador}.pdf"`);
+
+        // Nome do arquivo com informações do filtro
+        let filename = `relatorio_${veiculo.identificador}`;
+        if (tipo === 'resumido') filename += '_resumido';
+        if (inicio) filename += `_de_${inicio.replace(/\//g, '-')}`;
+        if (fim) filename += `_ate_${fim.replace(/\//g, '-')}`;
+        filename += '.pdf';
+
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.send(pdf);
 
     } catch (erro) {
