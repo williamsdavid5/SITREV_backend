@@ -5,35 +5,6 @@ import { DateTime } from 'luxon';
 
 const router = express.Router();
 
-// router.get('/limpo', async (_, res) => {
-//     try {
-//         const query = `
-//             SELECT 
-//                 v.id,
-//                 v.inicio AS data_viagem, 
-//                 m.nome AS nome_motorista,
-//                 ve.identificador AS identificador_veiculo,
-//                 ve.modelo AS modelo_veiculo,
-//                 COUNT(a.id) AS quantidade_alertas,
-//                 MAX(r.timestamp) AS ultimo_registro -- ADICIONADO: data/hora do último registro
-//             FROM viagens v
-//             JOIN motoristas m ON v.motorista_id = m.id
-//             JOIN veiculos ve ON v.veiculo_id = ve.id
-//             LEFT JOIN alertas a ON a.viagem_id = v.id
-//             LEFT JOIN registros r ON r.viagem_id = v.id -- ADICIONADO: join com registros
-//             GROUP BY v.id, v.inicio, m.nome, ve.identificador, ve.modelo
-//             ORDER BY v.inicio DESC
-//         `;
-
-//         const { rows } = await db.query(query);
-
-//         res.status(200).json(rows);
-//     } catch (err) {
-//         console.error('Erro ao buscar viagens resumidas:', err);
-//         res.status(500).json({ erro: 'Erro ao buscar viagens' });
-//     }
-// });
-
 router.get('/limpo', async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
@@ -68,12 +39,13 @@ router.get('/limpo', async (req, res) => {
 });
 
 // para a lógica de pesquisa
-// /api/viagens/buscar
 router.get('/buscar', async (req, res) => {
     try {
         const termo = req.query.q?.trim().toLowerCase() || '';
-        const dataInicio = req.query.dataInicio;
-        const dataFim = req.query.dataFim;
+        const dataInicio = req.query.dataInicio; // Formato: aaaa-mm-dd
+        const dataFim = req.query.dataFim;       // Formato: aaaa-mm-dd
+
+        console.log('📅 Parâmetros de busca:', { termo, dataInicio, dataFim }); // Log para debug
 
         let filtros = [];
         let valores = [];
@@ -92,6 +64,16 @@ router.get('/buscar', async (req, res) => {
 
         // 🔹 Filtro por intervalo de datas (ISO)
         if (dataInicio && dataFim) {
+            // Validação das datas
+            const inicioValido = /^\d{4}-\d{2}-\d{2}$/.test(dataInicio);
+            const fimValido = /^\d{4}-\d{2}-\d{2}$/.test(dataFim);
+
+            if (!inicioValido || !fimValido) {
+                return res.status(400).json({
+                    erro: 'Formato de data inválido. Use aaaa-mm-dd'
+                });
+            }
+
             filtros.push(`v.inicio::date BETWEEN $${contador} AND $${contador + 1}`);
             valores.push(dataInicio, dataFim);
             contador += 2;
@@ -119,7 +101,13 @@ router.get('/buscar', async (req, res) => {
             LIMIT 100;
         `;
 
+        console.log('🔍 Query executada:', query); // Log para debug
+        console.log('📊 Valores:', valores); // Log para debug
+
         const { rows } = await db.query(query, valores);
+
+        console.log(`✅ Resultados encontrados: ${rows.length}`); // Log para debug
+
         res.status(200).json(rows);
     } catch (err) {
         console.error('Erro ao buscar viagens:', err);
