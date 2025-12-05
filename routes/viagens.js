@@ -135,11 +135,92 @@ function pontoEmPoligono(ponto, poligono) {
 }
 
 // pesquisa viagens que estão dentro de uma área específica
+// router.post('/area', async (req, res) => {
+//     try {
+//         const { coordenadas, dataInicio, dataFim } = req.body;
+
+//         console.log("entrada", coordenadas, dataInicio, dataFim);
+
+//         if (!coordenadas || !dataInicio || !dataFim) {
+//             return res.status(400).json({
+//                 erro: 'Parâmetros obrigatórios faltando'
+//             });
+//         }
+
+//         const [diaInicio, mesInicio, anoInicio] = dataInicio.split('/');
+//         const [diaFim, mesFim, anoFim] = dataFim.split('/');
+
+//         const dataInicioISO = `${anoInicio}-${mesInicio.padStart(2, '0')}-${diaInicio.padStart(2, '0')}`;
+//         const dataFimISO = `${anoFim}-${mesFim.padStart(2, '0')}-${diaFim.padStart(2, '0')}`;
+
+
+//         if (!Array.isArray(coordenadas) || coordenadas.length < 3) {
+//             return res.status(400).json({
+//                 erro: 'Coordenadas devem ser um array com pelo menos 3 pontos'
+//             });
+//         }
+//         const coordenadasArray = coordenadas;
+
+//         const queryViagens = `
+//             SELECT 
+//                 v.id,
+//                 v.inicio AS data_viagem, 
+//                 m.nome AS nome_motorista,
+//                 ve.identificador AS identificador_veiculo,
+//                 ve.modelo AS modelo_veiculo,
+//                 COUNT(a.id) AS quantidade_alertas,
+//                 MAX(r.timestamp) AS ultimo_registro
+//             FROM viagens v
+//             JOIN motoristas m ON v.motorista_id = m.id
+//             JOIN veiculos ve ON v.veiculo_id = ve.id
+//             LEFT JOIN alertas a ON a.viagem_id = v.id
+//             LEFT JOIN registros r ON r.viagem_id = v.id
+//             WHERE v.inicio >= $1::timestamp AND v.inicio <= $2::timestamp
+//             GROUP BY v.id, v.inicio, m.nome, ve.identificador, ve.modelo
+//             ORDER BY v.inicio DESC
+//         `;
+
+//         const { rows: todasViagens } = await db.query(queryViagens, [
+//             `${dataInicioISO} 00:00:00`,
+//             `${dataFimISO} 23:59:59`
+//         ]);
+
+//         const viagensFiltradas = [];
+
+//         for (const viagem of todasViagens) {
+//             const queryRegistros = `
+//                 SELECT latitude, longitude 
+//                 FROM registros 
+//                 WHERE viagem_id = $1
+//             `;
+
+//             const { rows: registros } = await db.query(queryRegistros, [viagem.id]);
+
+//             const temRegistroNaArea = registros.some(registro =>
+//                 pontoEmPoligono(
+//                     [parseFloat(registro.latitude), parseFloat(registro.longitude)],
+//                     coordenadasArray
+//                 )
+//             );
+
+//             if (temRegistroNaArea) {
+//                 viagensFiltradas.push(viagem);
+//             }
+//         }
+
+//         res.status(200).json(viagensFiltradas);
+//     } catch (err) {
+//         console.error('Erro ao buscar viagens por área:', err);
+//         res.status(500).json({
+//             erro: 'Erro ao buscar viagens por área',
+//             detalhes: err.message
+//         });
+//     }
+// });
+
 router.post('/area', async (req, res) => {
     try {
         const { coordenadas, dataInicio, dataFim } = req.body;
-
-        console.log("entrada", coordenadas, dataInicio, dataFim);
 
         if (!coordenadas || !dataInicio || !dataFim) {
             return res.status(400).json({
@@ -153,71 +234,70 @@ router.post('/area', async (req, res) => {
         const dataInicioISO = `${anoInicio}-${mesInicio.padStart(2, '0')}-${diaInicio.padStart(2, '0')}`;
         const dataFimISO = `${anoFim}-${mesFim.padStart(2, '0')}-${diaFim.padStart(2, '0')}`;
 
-
-        if (!Array.isArray(coordenadas) || coordenadas.length < 3) {
-            return res.status(400).json({
-                erro: 'Coordenadas devem ser um array com pelo menos 3 pontos'
-            });
-        }
-        const coordenadasArray = coordenadas;
-
-        const queryViagens = `
+        // Query ÚNICA que faz tudo no banco
+        const query = `
+            WITH viagens_no_periodo AS (
+                SELECT 
+                    v.id,
+                    v.inicio AS data_viagem, 
+                    m.nome AS nome_motorista,
+                    ve.identificador AS identificador_veiculo,
+                    ve.modelo AS modelo_veiculo
+                FROM viagens v
+                JOIN motoristas m ON v.motorista_id = m.id
+                JOIN veiculos ve ON v.veiculo_id = ve.id
+                WHERE v.inicio >= $1::timestamp AND v.inicio <= $2::timestamp
+            ),
+            registros_das_viagens AS (
+                SELECT 
+                    r.viagem_id,
+                    r.latitude,
+                    r.longitude,
+                    r.timestamp
+                FROM registros r
+                WHERE r.viagem_id IN (SELECT id FROM viagens_no_periodo)
+            ),
+            viagens_com_ponto_na_area AS (
+                SELECT DISTINCT vp.id
+                FROM viagens_no_periodo vp
+                WHERE EXISTS (
+                    SELECT 1 FROM registros_das_viagens r
+                    WHERE r.viagem_id = vp.id
+                    AND ponto_em_poligono_sql(r.latitude, r.longitude, $3::text) = true
+                    -- Para em 1 registro encontrado (EXISTS é mais eficiente que JOIN)
+                )
+            )
             SELECT 
-                v.id,
-                v.inicio AS data_viagem, 
-                m.nome AS nome_motorista,
-                ve.identificador AS identificador_veiculo,
-                ve.modelo AS modelo_veiculo,
-                COUNT(a.id) AS quantidade_alertas,
+                vp.*,
+                COUNT(DISTINCT a.id) AS quantidade_alertas,
                 MAX(r.timestamp) AS ultimo_registro
-            FROM viagens v
-            JOIN motoristas m ON v.motorista_id = m.id
-            JOIN veiculos ve ON v.veiculo_id = ve.id
-            LEFT JOIN alertas a ON a.viagem_id = v.id
-            LEFT JOIN registros r ON r.viagem_id = v.id
-            WHERE v.inicio >= $1::timestamp AND v.inicio <= $2::timestamp
-            GROUP BY v.id, v.inicio, m.nome, ve.identificador, ve.modelo
-            ORDER BY v.inicio DESC
+            FROM viagens_com_ponto_na_area vf
+            INNER JOIN viagens_no_periodo vp ON vf.id = vp.id
+            LEFT JOIN alertas a ON a.viagem_id = vp.id
+            LEFT JOIN registros r ON r.viagem_id = vp.id
+            GROUP BY vp.id, vp.data_viagem, vp.nome_motorista, 
+                     vp.identificador_veiculo, vp.modelo_veiculo
+            ORDER BY vp.data_viagem DESC
         `;
 
-        const { rows: todasViagens } = await db.query(queryViagens, [
+        // Serializar coordenadas como texto
+        const coordenadasTexto = JSON.stringify(coordenadas);
+
+        const { rows } = await db.query(query, [
             `${dataInicioISO} 00:00:00`,
-            `${dataFimISO} 23:59:59`
+            `${dataFimISO} 23:59:59`,
+            coordenadasTexto
         ]);
 
-        const viagensFiltradas = [];
-
-        for (const viagem of todasViagens) {
-            const queryRegistros = `
-                SELECT latitude, longitude 
-                FROM registros 
-                WHERE viagem_id = $1
-            `;
-
-            const { rows: registros } = await db.query(queryRegistros, [viagem.id]);
-
-            const temRegistroNaArea = registros.some(registro =>
-                pontoEmPoligono(
-                    [parseFloat(registro.latitude), parseFloat(registro.longitude)],
-                    coordenadasArray
-                )
-            );
-
-            if (temRegistroNaArea) {
-                viagensFiltradas.push(viagem);
-            }
-        }
-
-        res.status(200).json(viagensFiltradas);
+        res.status(200).json(rows);
     } catch (err) {
-        console.error('Erro ao buscar viagens por área:', err);
+        console.error('Erro ao buscar viagens por área SQL:', err);
         res.status(500).json({
             erro: 'Erro ao buscar viagens por área',
             detalhes: err.message
         });
     }
 });
-
 
 // Criar viagem
 router.post('/', async (req, res) => {
