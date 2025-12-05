@@ -115,7 +115,108 @@ router.get('/buscar', async (req, res) => {
     }
 });
 
+// Função auxiliar para verificar se um ponto está dentro de um polígono (Ray Casting Algorithm)
+function pontoEmPoligono(ponto, poligono) {
+    const x = ponto[0];
+    const y = ponto[1];
+    let dentro = false;
 
+    for (let i = 0, j = poligono.length - 1; i < poligono.length; j = i++) {
+        const xi = poligono[i][0], yi = poligono[i][1];
+        const xj = poligono[j][0], yj = poligono[j][1];
+
+        const intersecta = ((yi > y) !== (yj > y)) &&
+            (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+
+        if (intersecta) dentro = !dentro;
+    }
+
+    return dentro;
+}
+
+// pesquisa viagens que estão dentro de uma área específica
+router.post('/area', async (req, res) => {
+    try {
+        const { coordenadas, dataInicio, dataFim } = req.body;
+
+        console.log("entrada", coordenadas, dataInicio, dataFim);
+
+        if (!coordenadas || !dataInicio || !dataFim) {
+            return res.status(400).json({
+                erro: 'Parâmetros obrigatórios faltando'
+            });
+        }
+
+        const [diaInicio, mesInicio, anoInicio] = dataInicio.split('/');
+        const [diaFim, mesFim, anoFim] = dataFim.split('/');
+
+        const dataInicioISO = `${anoInicio}-${mesInicio.padStart(2, '0')}-${diaInicio.padStart(2, '0')}`;
+        const dataFimISO = `${anoFim}-${mesFim.padStart(2, '0')}-${diaFim.padStart(2, '0')}`;
+
+
+        if (!Array.isArray(coordenadas) || coordenadas.length < 3) {
+            return res.status(400).json({
+                erro: 'Coordenadas devem ser um array com pelo menos 3 pontos'
+            });
+        }
+        const coordenadasArray = coordenadas;
+
+        const queryViagens = `
+            SELECT 
+                v.id,
+                v.inicio AS data_viagem, 
+                m.nome AS nome_motorista,
+                ve.identificador AS identificador_veiculo,
+                ve.modelo AS modelo_veiculo,
+                COUNT(a.id) AS quantidade_alertas,
+                MAX(r.timestamp) AS ultimo_registro
+            FROM viagens v
+            JOIN motoristas m ON v.motorista_id = m.id
+            JOIN veiculos ve ON v.veiculo_id = ve.id
+            LEFT JOIN alertas a ON a.viagem_id = v.id
+            LEFT JOIN registros r ON r.viagem_id = v.id
+            WHERE v.inicio >= $1::timestamp AND v.inicio <= $2::timestamp
+            GROUP BY v.id, v.inicio, m.nome, ve.identificador, ve.modelo
+            ORDER BY v.inicio DESC
+        `;
+
+        const { rows: todasViagens } = await db.query(queryViagens, [
+            `${dataInicioISO} 00:00:00`,
+            `${dataFimISO} 23:59:59`
+        ]);
+
+        const viagensFiltradas = [];
+
+        for (const viagem of todasViagens) {
+            const queryRegistros = `
+                SELECT latitude, longitude 
+                FROM registros 
+                WHERE viagem_id = $1
+            `;
+
+            const { rows: registros } = await db.query(queryRegistros, [viagem.id]);
+
+            const temRegistroNaArea = registros.some(registro =>
+                pontoEmPoligono(
+                    [parseFloat(registro.latitude), parseFloat(registro.longitude)],
+                    coordenadasArray
+                )
+            );
+
+            if (temRegistroNaArea) {
+                viagensFiltradas.push(viagem);
+            }
+        }
+
+        res.status(200).json(viagensFiltradas);
+    } catch (err) {
+        console.error('Erro ao buscar viagens por área:', err);
+        res.status(500).json({
+            erro: 'Erro ao buscar viagens por área',
+            detalhes: err.message
+        });
+    }
+});
 
 
 // Criar viagem
